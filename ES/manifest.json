@@ -3,10 +3,18 @@
   "name": "Entry Save Manager",
   "version": "1.0.0",
   "description": "엔트리 작품의 '@' 변수/리스트 데이터를 로컬에 저장하고 불러오는 확장 프로그램",
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "permissions": ["activeTab", "scripting"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Entry Save Manager"
+    "default_title": "Entry Save Manager",
+    "default_icon": {
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "content_scripts": [
     {

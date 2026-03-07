@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Entry Save Manager</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
 
     * {
       margin: 0;
@@ -14,30 +14,24 @@
     }
 
     body {
-      width: 320px;
+      width: 280px;
       font-family: 'Noto Sans KR', sans-serif;
-      background: #1a1b2e;
-      color: #e0e0e0;
+      background: #ffffff;
+      color: #333333;
       overflow: hidden;
     }
 
     .header {
-      background: linear-gradient(135deg, #2d1b69 0%, #11998e 100%);
-      padding: 20px;
+      background: #5094FA; /* 엔트리 만들기 화면의 파란색 톤 */
+      padding: 14px;
       text-align: center;
     }
 
     .header h1 {
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 700;
-      color: #fff;
+      color: #ffffff;
       letter-spacing: -0.3px;
-    }
-
-    .header p {
-      font-size: 11px;
-      color: rgba(255,255,255,0.7);
-      margin-top: 4px;
     }
 
     .content {
@@ -45,10 +39,10 @@
     }
 
     .info-box {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 10px;
-      padding: 12px 14px;
+      background: #F8F9FA;
+      border: 1px solid #E9ECEF;
+      border-radius: 8px;
+      padding: 12px;
       margin-bottom: 16px;
     }
 
@@ -62,61 +56,57 @@
     .info-row + .info-row {
       margin-top: 8px;
       padding-top: 8px;
-      border-top: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px dashed #E9ECEF;
     }
 
     .info-label {
-      color: #999;
+      color: #868E96;
+      font-weight: 500;
     }
 
     .info-value {
-      color: #e0e0e0;
-      font-weight: 500;
-      max-width: 180px;
+      color: #343A40;
+      font-weight: 700;
+      max-width: 140px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
     .info-value.active {
-      color: #38ef7d;
+      color: #5094FA;
     }
 
     .info-value.inactive {
-      color: #ff6b6b;
+      color: #FA5252;
     }
 
     .section-title {
       font-size: 11px;
-      font-weight: 600;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 10px;
+      font-weight: 700;
+      color: #ADB5BD;
+      margin-bottom: 8px;
     }
 
     .btn {
       width: 100%;
-      padding: 12px 16px;
+      padding: 10px;
       border: none;
-      border-radius: 10px;
+      border-radius: 6px;
       font-family: 'Noto Sans KR', sans-serif;
-      font-size: 13px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 700;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background-color 0.2s, color 0.2s;
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: center;
+      gap: 6px;
     }
-
-    .btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    }
-
-    .btn:active {
-      transform: translateY(0);
+    
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .btn + .btn {
@@ -124,54 +114,54 @@
     }
 
     .btn-reset-current {
-      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-      color: #fff;
+      background: #5094FA;
+      color: #ffffff;
+    }
+    .btn-reset-current:hover:not(:disabled) {
+      background: #4281E2;
     }
 
     .btn-reset-all {
-      background: linear-gradient(135deg, #ff6b6b 0%, #ee0979 100%);
-      color: #fff;
+      background: #ffffff;
+      border: 1px solid #FA5252;
+      color: #FA5252;
     }
-
-    .btn-icon {
-      font-size: 16px;
+    .btn-reset-all:hover:not(:disabled) {
+      background: #FFF5F5;
     }
 
     .toast {
       position: fixed;
       bottom: -80px;
-      left: 16px;
-      right: 16px;
-      background: #2d3748;
-      border: 1px solid rgba(56, 239, 125, 0.3);
-      border-radius: 10px;
-      padding: 12px 14px;
+      left: 12px;
+      right: 12px;
+      background: #343A40;
+      border-radius: 8px;
+      padding: 12px;
       font-size: 12px;
-      color: #e0e0e0;
-      transition: bottom 0.3s ease;
+      color: #ffffff;
+      transition: bottom 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       z-index: 10;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
 
     .toast.show {
-      bottom: 16px;
+      bottom: 12px;
     }
 
     .toast .toast-title {
-      font-weight: 600;
-      color: #38ef7d;
+      font-weight: 700;
+      color: #74C0FC;
       margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
     }
 
     .toast .toast-msg {
-      color: #ccc;
-      line-height: 1.5;
+      color: #F8F9FA;
+      line-height: 1.4;
     }
 
     .toast .toast-warn {
-      color: #ffd93d;
+      color: #FFD43B;
       font-weight: 500;
       margin-top: 6px;
       font-size: 11px;
@@ -181,11 +171,11 @@
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.6);
+      background: rgba(0,0,0,0.5);
       z-index: 20;
       align-items: center;
       justify-content: center;
-      padding: 20px;
+      padding: 16px;
     }
 
     .confirm-overlay.show {
@@ -193,26 +183,28 @@
     }
 
     .confirm-box {
-      background: #252740;
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 14px;
+      background: #ffffff;
+      border-radius: 10px;
       padding: 20px;
       width: 100%;
-      max-width: 280px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.15);
     }
 
     .confirm-box h3 {
       font-size: 14px;
       font-weight: 700;
-      color: #fff;
+      color: #212529;
       margin-bottom: 8px;
+      text-align: center;
     }
 
     .confirm-box p {
       font-size: 12px;
-      color: #aaa;
-      line-height: 1.6;
+      color: #495057;
+      line-height: 1.5;
       margin-bottom: 16px;
+      text-align: center;
+      white-space: pre-wrap;
     }
 
     .confirm-buttons {
@@ -222,39 +214,35 @@
 
     .confirm-buttons .btn {
       flex: 1;
-      justify-content: center;
-      padding: 10px;
-      font-size: 12px;
+      padding: 8px;
     }
 
     .btn-cancel {
-      background: rgba(255,255,255,0.08);
-      color: #ccc;
+      background: #F1F3F5;
+      color: #495057;
+    }
+    .btn-cancel:hover {
+      background: #E9ECEF;
     }
 
     .btn-danger {
-      background: linear-gradient(135deg, #ff6b6b 0%, #ee0979 100%);
-      color: #fff;
+      background: #FA5252;
+      color: #ffffff;
     }
-
-    .no-data {
-      text-align: center;
-      color: #666;
-      font-size: 12px;
-      padding: 10px 0;
+    .btn-danger:hover {
+      background: #E03131;
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>📦 Entry Save Manager</h1>
-    <p>엔트리 변수/리스트 로컬 저장 관리</p>
+    <h1>Entry Save Manager</h1>
   </div>
 
   <div class="content">
     <div class="info-box">
       <div class="info-row">
-        <span class="info-label">현재 페이지</span>
+        <span class="info-label">현재 상태</span>
         <span class="info-value" id="pageStatus">확인 중...</span>
       </div>
       <div class="info-row">
@@ -270,13 +258,11 @@
     <div class="section-title">데이터 관리</div>
 
     <button class="btn btn-reset-current" id="btnResetCurrent" disabled>
-      <span class="btn-icon">🗑️</span>
-      현재 작품 데이터 초기화
+      현재 작품 초기화
     </button>
 
-    <button class="btn btn-reset-all" id="btnResetAll">
-      <span class="btn-icon">⚠️</span>
-      모든 작품 데이터 초기화
+    <button class="btn btn-reset-all" id="btnResetAll" disabled>
+      모든 데이터 초기화
     </button>
   </div>
 
