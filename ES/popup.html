@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entry Save Manager</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 320px;
+      font-family: 'Noto Sans KR', sans-serif;
+      background: #1a1b2e;
+      color: #e0e0e0;
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #2d1b69 0%, #11998e 100%);
+      padding: 20px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.3px;
+    }
+
+    .header p {
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      margin-top: 4px;
+    }
+
+    .content {
+      padding: 16px;
+    }
+
+    .info-box {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .info-row + .info-row {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .info-label {
+      color: #999;
+    }
+
+    .info-value {
+      color: #e0e0e0;
+      font-weight: 500;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .info-value.active {
+      color: #38ef7d;
+    }
+
+    .info-value.inactive {
+      color: #ff6b6b;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 10px;
+      font-family: 'Noto Sans KR', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn + .btn {
+      margin-top: 8px;
+    }
+
+    .btn-reset-current {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: #fff;
+    }
+
+    .btn-reset-all {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee0979 100%);
+      color: #fff;
+    }
+
+    .btn-icon {
+      font-size: 16px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: -80px;
+      left: 16px;
+      right: 16px;
+      background: #2d3748;
+      border: 1px solid rgba(56, 239, 125, 0.3);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: #e0e0e0;
+      transition: bottom 0.3s ease;
+      z-index: 10;
+    }
+
+    .toast.show {
+      bottom: 16px;
+    }
+
+    .toast .toast-title {
+      font-weight: 600;
+      color: #38ef7d;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .toast .toast-msg {
+      color: #ccc;
+      line-height: 1.5;
+    }
+
+    .toast .toast-warn {
+      color: #ffd93d;
+      font-weight: 500;
+      margin-top: 6px;
+      font-size: 11px;
+    }
+
+    .confirm-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 20;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .confirm-overlay.show {
+      display: flex;
+    }
+
+    .confirm-box {
+      background: #252740;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      padding: 20px;
+      width: 100%;
+      max-width: 280px;
+    }
+
+    .confirm-box h3 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .confirm-box p {
+      font-size: 12px;
+      color: #aaa;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .confirm-buttons {
+      display: flex;
+      gap: 8px;
+    }
+
+    .confirm-buttons .btn {
+      flex: 1;
+      justify-content: center;
+      padding: 10px;
+      font-size: 12px;
+    }
+
+    .btn-cancel {
+      background: rgba(255,255,255,0.08);
+      color: #ccc;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee0979 100%);
+      color: #fff;
+    }
+
+    .no-data {
+      text-align: center;
+      color: #666;
+      font-size: 12px;
+      padding: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📦 Entry Save Manager</h1>
+    <p>엔트리 변수/리스트 로컬 저장 관리</p>
+  </div>
+
+  <div class="content">
+    <div class="info-box">
+      <div class="info-row">
+        <span class="info-label">현재 페이지</span>
+        <span class="info-value" id="pageStatus">확인 중...</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">프로젝트 ID</span>
+        <span class="info-value" id="projectId">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">저장된 데이터</span>
+        <span class="info-value" id="dataStatus">확인 중...</span>
+      </div>
+    </div>
+
+    <div class="section-title">데이터 관리</div>
+
+    <button class="btn btn-reset-current" id="btnResetCurrent" disabled>
+      <span class="btn-icon">🗑️</span>
+      현재 작품 데이터 초기화
+    </button>
+
+    <button class="btn btn-reset-all" id="btnResetAll">
+      <span class="btn-icon">⚠️</span>
+      모든 작품 데이터 초기화
+    </button>
+  </div>
+
+  <div class="toast" id="toast">
+    <div class="toast-title">✅ <span id="toastTitle"></span></div>
+    <div class="toast-msg" id="toastMsg"></div>
+    <div class="toast-warn">⚡ 페이지를 새로고침해야 적용됩니다.</div>
+  </div>
+
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+      <h3 id="confirmTitle"></h3>
+      <p id="confirmMsg"></p>
+      <div class="confirm-buttons">
+        <button class="btn btn-cancel" id="btnConfirmCancel">취소</button>
+        <button class="btn btn-danger" id="btnConfirmOk">초기화</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
