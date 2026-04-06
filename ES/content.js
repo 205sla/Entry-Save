@@ -15,6 +15,9 @@
 (function () {
   'use strict';
 
+  const URL_CHANGE_DELAY = 2000;  // URL 변경 후 재삽입 대기 (ms)
+  const FALLBACK_DELAY = 1000;    // 초기 폴백 삽입 대기 (ms)
+
   console.log('[Entry Save Manager] content.js 로드됨 (Isolated World)');
 
   // ─────────────────────────────────────────────
@@ -91,14 +94,14 @@
 
       // 작품 페이지인 경우에만 재삽입
       if (lastUrl.includes('/project/') || lastUrl.includes('/ws/')) {
-        setTimeout(() => {
+        setTimeout(function () {
           // MAIN world 플래그 리셋을 위해 커스텀 이벤트 전송
           window.postMessage(
             { type: 'ENTRY_SAVE_MANAGER', action: 'URL_CHANGED' },
             '*'
           );
           injectScriptFallback();
-        }, 2000);
+        }, URL_CHANGE_DELAY);
       }
     }
   });
@@ -116,5 +119,5 @@
   //  inject.js 내부 로직이 재실행되지 않습니다.
 
   // 약간의 딜레이 후 폴백 삽입 시도
-  setTimeout(injectScriptFallback, 1000);
+  setTimeout(injectScriptFallback, FALLBACK_DELAY);
 })();

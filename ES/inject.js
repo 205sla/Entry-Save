@@ -21,11 +21,23 @@
   const PREFIX = '@';                      // 추적 대상 변수/리스트 접두사
   const SAVE_FUNC_NAME = '@저장';          // 저장 트리거 함수 이름
   const STATUS_VAR_NAME = '@확장프로그램'; // 확장프로그램 설치 확인 변수
-  const STORAGE_KEY_PREFIX = 'entry_save_'; // localStorage 키 접두사
+  const STORAGE_KEY_PREFIX = ESM.STORAGE_KEY_PREFIX;
+
+  // 타이밍 상수 (ms)
+  const POLL_INTERVAL = 500;               // Entry 객체 / 엔진 상태 폴링 간격
+  const STATE_CHECK_DELAY = 300;           // 상태 전이 후 확인 딜레이
+  const HOOK_RETRY_MAX = 20;              // 함수 후킹 최대 재시도 (POLL_INTERVAL × N)
+
+  // 디버그 로깅 (배포 시 false로 설정)
+  const DEBUG = false;
+  function debug(...args) { if (DEBUG) console.log('[ESM]', ...args); }
 
   // 중복 초기화 방지 플래그
   if (window.__entrySaveManagerLoaded) return;
   window.__entrySaveManagerLoaded = true;
+
+  // 활성 폴링 타이머 (정리용)
+  let enginePollTimer = null;
 
   // 페이지 타입 판별 (/project/ 및 /iframe/ 둘 다 작품 실행 페이지)
   const isProjectPage = location.pathname.startsWith('/project/') || location.pathname.startsWith('/iframe/');
@@ -36,8 +48,7 @@
    * /ws/xxx, /project/xxx, /iframe/xxx 형태에서 xxx를 반환합니다.
    */
   function getProjectIdFromUrl() {
-    const match = location.pathname.match(/\/(ws|project|iframe)\/([a-f0-9]+)/);
-    return match ? match[2] : null;
+    return ESM.extractProjectId(location.pathname);
   }
 
   /**
@@ -48,7 +59,7 @@
   }
 
   console.log('[Entry Save Manager] inject.js 로드됨 (MAIN world)');
-  console.log(`[DEBUG] 페이지 타입: ${isProjectPage ? '/project/' : isWorkspacePage ? '/ws/' : '기타'} — URL: ${location.href}`);
+  debug(`페이지 타입: ${isProjectPage ? '/project/' : isWorkspacePage ? '/ws/' : '기타'} — URL: ${location.href}`);
 
   // ─────────────────────────────────────────────
   //  유틸리티 함수
@@ -73,60 +84,51 @@
         const hasBlock = !!(window.Entry && window.Entry.block);
 
         if (pollCount <= 5 || pollCount % 10 === 0) {
-          console.log(`[DEBUG] waitForEntry 폴링 #${pollCount} — Entry:${hasEntry}, vc:${hasVC}, pid:${hasPid}(${getProjectId()||""}), engine:${hasEngine}, block:${hasBlock}`);
+          debug(`waitForEntry 폴링 #${pollCount} — Entry:${hasEntry}, vc:${hasVC}, pid:${hasPid}(${getProjectId()||""}), engine:${hasEngine}, block:${hasBlock}`);
         }
 
         // 5번째 폴링에서 진단 정보 출력
-        if (pollCount === 5 && !hasEntry) {
-          console.log('[DEBUG] ===== Entry 미발견 진단 =====');
-
-          // iframe 검색
+        if (DEBUG && pollCount === 5 && !hasEntry) {
+          debug('===== Entry 미발견 진단 =====');
           const iframes = document.querySelectorAll('iframe');
-          console.log('[DEBUG] iframe 개수:', iframes.length);
+          debug('iframe 개수:', iframes.length);
           iframes.forEach((iframe, i) => {
             try {
               const iframeEntry = iframe.contentWindow && iframe.contentWindow.Entry;
-              console.log(`[DEBUG]   iframe[${i}] src:${iframe.src}, Entry:${!!iframeEntry}`);
+              debug(`  iframe[${i}] src:${iframe.src}, Entry:${!!iframeEntry}`);
             } catch (e) {
-              console.log(`[DEBUG]   iframe[${i}] src:${iframe.src}, 접근 불가 (cross-origin)`);
+              debug(`  iframe[${i}] src:${iframe.src}, 접근 불가 (cross-origin)`);
             }
           });
-
-          // window 전역 변수 중 entry 관련 검색
-          const entryRelated = Object.keys(window).filter(k =>
-            /entry/i.test(k)
-          );
-          console.log('[DEBUG] window에서 entry 관련 키:', entryRelated);
-
-          // #entryCanvas, .entryEngine 등 DOM 요소 검색
+          const entryRelated = Object.keys(window).filter(k => /entry/i.test(k));
+          debug('window에서 entry 관련 키:', entryRelated);
           const canvas = document.querySelector('#entryCanvas, canvas');
-          console.log('[DEBUG] canvas 요소:', canvas ? canvas.id || canvas.tagName : '없음');
-
-          console.log('[DEBUG] ========================');
+          debug('canvas 요소:', canvas ? canvas.id || canvas.tagName : '없음');
+          debug('========================');
         }
 
         // window.Entry가 있지만 다른 조건이 부족한 경우
-        if (hasEntry && !hasVC && pollCount === 10) {
-          console.log('[DEBUG] Entry 존재하지만 variableContainer 없음');
-          console.log('[DEBUG] Entry 키:', Object.keys(window.Entry).slice(0, 30));
+        if (DEBUG && hasEntry && !hasVC && pollCount === 10) {
+          debug('Entry 존재하지만 variableContainer 없음');
+          debug('Entry 키:', Object.keys(window.Entry).slice(0, 30));
         }
 
         const basic = hasEntry && hasVC && hasPid;
 
         if (!basic) {
-          setTimeout(check, 500);
+          setTimeout(check, POLL_INTERVAL);
           return;
         }
 
         // /project/ 페이지에서는 block과 engine도 대기
         if (isProjectPage) {
           if (!hasEngine || !hasBlock) {
-            setTimeout(check, 500);
+            setTimeout(check, POLL_INTERVAL);
             return;
           }
         }
 
-        console.log(`[DEBUG] waitForEntry 완료! (${pollCount}회 폴링)`);
+        debug(`waitForEntry 완료! (${pollCount}회 폴링)`);
         resolve();
       };
       check();
@@ -148,9 +150,9 @@
   function getTargetVariables() {
     const container = Entry.variableContainer;
     const vars = container.variables_ || [];
-    console.log('[DEBUG] 전체 변수 개수:', vars.length);
+    debug('전체 변수 개수:', vars.length);
     const filtered = vars.filter((v) => v.name_ && v.name_.startsWith(PREFIX));
-    console.log('[DEBUG] "@" 접두사 변수 개수:', filtered.length);
+    debug('"@" 접두사 변수 개수:', filtered.length);
     return filtered.map((v) => ({
       id: v.id_,
       name: v.name_,
@@ -161,9 +163,9 @@
   function getTargetLists() {
     const container = Entry.variableContainer;
     const lists = container.lists_ || [];
-    console.log('[DEBUG] 전체 리스트 개수:', lists.length);
+    debug('전체 리스트 개수:', lists.length);
     const filtered = lists.filter((l) => l.name_ && l.name_.startsWith(PREFIX));
-    console.log('[DEBUG] "@" 접두사 리스트 개수:', filtered.length);
+    debug('"@" 접두사 리스트 개수:', filtered.length);
     return filtered.map((l) => ({
       id: l.id_,
       name: l.name_,
@@ -176,7 +178,7 @@
   // ─────────────────────────────────────────────
 
   function saveData() {
-    console.log('[DEBUG] ===== saveData() 호출됨 =====');
+    debug('===== saveData() 호출됨 =====');
     try {
       const variables = getTargetVariables();
       const lists = getTargetLists();
@@ -192,11 +194,11 @@
 
       // 저장 검증
       const verify = localStorage.getItem(key);
-      console.log('[DEBUG] 저장 검증 — 일치:', verify === jsonStr, '길이:', jsonStr.length);
+      debug('저장 검증 — 일치:', verify === jsonStr, '길이:', jsonStr.length);
       console.log('[Entry Save Manager] 데이터 저장 완료:', key);
     } catch (e) {
       console.error('[Entry Save Manager] 저장 실패:', e);
-      console.error('[DEBUG] 저장 실패 스택:', e.stack);
+      debug('저장 실패 스택:', e.stack);
     }
   }
 
@@ -284,7 +286,7 @@
     }
 
     let prevState = Entry.engine.state || 'stop';
-    console.log(`[DEBUG] watchEngineState 시작 — 초기 상태: ${prevState}`);
+    debug(`watchEngineState 시작 — 초기 상태: ${prevState}`);
 
     // ── 방법 1: toggleRun 후킹 (즉각 감지) ──
     if (Entry.engine.toggleRun) {
@@ -295,14 +297,14 @@
         // toggleRun 후 약간의 딜레이를 두고 상태 확인
         setTimeout(() => {
           const newState = Entry.engine.state;
-          console.log(`[DEBUG] toggleRun 후 상태: ${prevState} → ${newState}`);
+          debug(`toggleRun 후 상태: ${prevState} → ${newState}`);
           if (newState === 'run') {
             console.log('[Entry Save Manager] 실행 시작 감지 — 데이터 로드');
             loadData();
             setExtensionStatusFlag();
           }
           prevState = newState;
-        }, 300);
+        }, STATE_CHECK_DELAY);
 
         return result;
       };
@@ -310,23 +312,22 @@
     }
 
     // ── 방법 2: 상태 폴링 (자동 실행 및 폴백) ──
-    const pollState = () => {
+    if (enginePollTimer) clearInterval(enginePollTimer);
+    enginePollTimer = setInterval(() => {
       const currentState = Entry.engine.state;
 
       // non-run → run 전이 감지
       if (currentState === 'run' && prevState !== 'run') {
-        console.log(`[DEBUG] 엔진 상태 전이 감지: ${prevState} → ${currentState}`);
+        debug(`엔진 상태 전이 감지: ${prevState} → ${currentState}`);
         console.log('[Entry Save Manager] 실행 시작 감지(폴링) — 데이터 로드');
         setTimeout(() => {
           loadData();
           setExtensionStatusFlag();
-        }, 300);
+        }, STATE_CHECK_DELAY);
       }
 
       prevState = currentState;
-      setTimeout(pollState, 500);
-    };
-    pollState();
+    }, POLL_INTERVAL);
   }
 
   /**
@@ -356,19 +357,19 @@
   function findSaveFunctionId() {
     const functions = Entry.variableContainer.functions_;
     if (!functions) {
-      console.log('[DEBUG] functions_ 없음');
+      debug('functions_ 없음');
       return null;
     }
 
     const funcEntries = Object.entries(functions);
-    console.log('[DEBUG] 등록된 함수 개수:', funcEntries.length);
+    debug('등록된 함수 개수:', funcEntries.length);
 
     // 방법 1: 이름 추출
     for (const [funcId, funcObj] of funcEntries) {
       const name = extractFunctionName(funcObj);
-      console.log(`[DEBUG] 함수 — id: ${funcId}, 이름: "${name}"`);
+      debug(`함수 — id: ${funcId}, 이름: "${name}"`);
       if (name === SAVE_FUNC_NAME) {
-        console.log(`[DEBUG] ✓ 이름 매칭으로 "@저장" 발견! id: ${funcId}`);
+        debug(`이름 매칭으로 "@저장" 발견: id=${funcId}`);
         return funcId;
       }
     }
@@ -378,13 +379,13 @@
       try {
         const jsonStr = JSON.stringify(funcObj.content);
         if (jsonStr.includes(SAVE_FUNC_NAME)) {
-          console.log(`[DEBUG] ✓ JSON 검색으로 "@저장" 발견! id: ${funcId}`);
+          debug(`JSON 검색으로 "@저장" 발견: id=${funcId}`);
           return funcId;
         }
       } catch (e) { /* ignore */ }
     }
 
-    console.warn('[DEBUG] "@저장" 함수를 찾지 못했습니다.');
+    debug('"@저장" 함수를 찾지 못했습니다.');
     return null;
   }
 
@@ -392,45 +393,57 @@
    * Entry의 함수 시스템을 후킹하여 '@저장' 함수 호출 시 saveData()를 실행합니다.
    * 함수 블록이 아직 등록되지 않았으면 폴링으로 재시도합니다.
    */
-  function hookFunctionCalls(retryCount) {
-    retryCount = retryCount || 0;
-    const MAX_RETRIES = 20; // 최대 10초 대기 (500ms × 20)
+  async function hookFunctionCalls() {
+    for (let attempt = 1; attempt <= HOOK_RETRY_MAX; attempt++) {
+      debug(`hookFunctionCalls() 시도 #${attempt}`);
 
-    console.log(`[DEBUG] hookFunctionCalls() 시도 #${retryCount + 1}`);
+      const saveFuncId = findSaveFunctionId();
+      if (saveFuncId) {
+        const blockKey = 'func_' + saveFuncId;
+        debug(`함수 블록 키: ${blockKey}`);
 
-    const saveFuncId = findSaveFunctionId();
-
-    if (saveFuncId) {
-      const blockKey = 'func_' + saveFuncId;
-      console.log(`[DEBUG] 함수 블록 키: ${blockKey}`);
-
-      if (Entry.block && Entry.block[blockKey] && Entry.block[blockKey].func) {
-        const origFunc = Entry.block[blockKey].func;
-        Entry.block[blockKey].func = function (sprite, script) {
-          console.log('[Entry Save Manager] "@저장" 함수 호출 감지!');
-          saveData();
-          return origFunc.call(this, sprite, script);
-        };
-        console.log(`[Entry Save Manager] "@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
-        return; // 성공
-      } else {
-        console.log(`[DEBUG] Entry.block["${blockKey}"] 또는 .func가 아직 없음`);
+        if (Entry.block && Entry.block[blockKey] && Entry.block[blockKey].func) {
+          const origFunc = Entry.block[blockKey].func;
+          Entry.block[blockKey].func = function (sprite, script) {
+            console.log('[Entry Save Manager] "@저장" 함수 호출 감지!');
+            saveData();
+            return origFunc.call(this, sprite, script);
+          };
+          console.log(`[Entry Save Manager] "@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
+          return;
+        } else {
+          debug(`Entry.block["${blockKey}"] 또는 .func가 아직 없음`);
+        }
       }
+
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
     }
 
-    // 아직 준비되지 않았으면 재시도 (functions_, block 모두 대기)
-    if (retryCount < MAX_RETRIES) {
-      console.log(`[DEBUG] 함수 후킹 재시도 예정 (${retryCount + 1}/${MAX_RETRIES})...`);
-      setTimeout(() => hookFunctionCalls(retryCount + 1), 500);
-    } else {
-      console.error('[Entry Save Manager] "@저장" 함수 후킹 최대 재시도 초과');
-      // 마지막 시도: Entry.block에서 func_ 키 덤프
-      if (Entry.block) {
-        const funcKeys = Object.keys(Entry.block).filter(k => k.startsWith('func_'));
-        console.log('[DEBUG] 최종 Entry.block func_ 키:', funcKeys);
-      }
+    console.error('[Entry Save Manager] "@저장" 함수 후킹 최대 재시도 초과');
+    if (DEBUG && Entry.block) {
+      const funcKeys = Object.keys(Entry.block).filter(k => k.startsWith('func_'));
+      debug('최종 Entry.block func_ 키:', funcKeys);
     }
   }
+
+  // ─────────────────────────────────────────────
+  //  URL 변경 시 정리 (SPA 대응)
+  // ─────────────────────────────────────────────
+  //  content.js가 URL 변경을 감지하면 URL_CHANGED 메시지를 보냅니다.
+  //  기존 폴링을 정리하고 플래그를 리셋하여 재주입 시 재초기화를 허용합니다.
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const data = event.data;
+    if (!data || data.type !== 'ENTRY_SAVE_MANAGER' || data.action !== 'URL_CHANGED') return;
+
+    debug('URL 변경 감지 — 폴링 정리');
+    if (enginePollTimer) {
+      clearInterval(enginePollTimer);
+      enginePollTimer = null;
+    }
+    window.__entrySaveManagerLoaded = false;
+  });
 
   // ─────────────────────────────────────────────
   //  초기화 (메인 로직)
@@ -442,18 +455,20 @@
     console.log('[Entry Save Manager] Entry 준비 완료. Project ID:', Entry.projectId);
 
     // Entry 객체 상태 출력
-    console.log('[DEBUG] ===== Entry 객체 상태 =====');
-    console.log('[DEBUG] Entry.engine:', !!Entry.engine);
-    console.log('[DEBUG] Entry.engine.state:', Entry.engine ? Entry.engine.state : '(없음)');
-    console.log('[DEBUG] Entry.variableContainer.functions_:', Entry.variableContainer.functions_ ? Object.keys(Entry.variableContainer.functions_).length + '개' : '(없음)');
-    console.log('[DEBUG] Entry.block:', !!Entry.block);
-    console.log('[DEBUG] func_ 블록:', Entry.block ? Object.keys(Entry.block).filter(k => k.startsWith('func_')) : '(없음)');
-    console.log('[DEBUG] 기존 저장 데이터:', localStorage.getItem(getStorageKey()) ? '있음' : '없음');
-    console.log('[DEBUG] ========================');
+    if (DEBUG) {
+      debug('===== Entry 객체 상태 =====');
+      debug('Entry.engine:', !!Entry.engine);
+      debug('Entry.engine.state:', Entry.engine ? Entry.engine.state : '(없음)');
+      debug('Entry.variableContainer.functions_:', Entry.variableContainer.functions_ ? Object.keys(Entry.variableContainer.functions_).length + '개' : '(없음)');
+      debug('Entry.block:', !!Entry.block);
+      debug('func_ 블록:', Entry.block ? Object.keys(Entry.block).filter(k => k.startsWith('func_')) : '(없음)');
+      debug('기존 저장 데이터:', localStorage.getItem(getStorageKey()) ? '있음' : '없음');
+      debug('========================');
+    }
 
     // 1) 함수 호출 후킹 (저장 트리거 — '@저장' 함수)
     //    폴링 방식으로 함수/블록이 준비될 때까지 재시도
-    hookFunctionCalls(0);
+    hookFunctionCalls();
 
     // 2) 엔진 상태 감시 — 매 실행 시 데이터 로드 (모든 페이지 공통)
     watchEngineState();

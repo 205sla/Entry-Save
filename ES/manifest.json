@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Entry Save Manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "엔트리 작품의 '@' 변수/리스트 데이터를 로컬에 저장하고 불러오는 확장 프로그램",
   "icons": {
     "48": "icon48.png",
@@ -31,7 +31,7 @@
         "https://playentry.org/*",
         "https://*.playentry.org/*"
       ],
-      "js": ["inject.js"],
+      "js": ["shared.js", "inject.js"],
       "run_at": "document_idle",
       "world": "MAIN",
       "all_frames": true
@@ -39,7 +39,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["inject.js"],
+      "resources": ["shared.js", "inject.js"],
       "matches": [
         "https://playentry.org/*",
         "https://*.playentry.org/*"
