@@ -200,7 +200,7 @@ btnResetCurrent.addEventListener('click', () => {
 btnResetAll.addEventListener('click', () => {
   showConfirm(
     '⚠️ 모든 데이터 초기화',
-    '모든 엔트리 작품에 저��된 변수/리스트 데이터가 삭제됩니다.\n\n이 작업은 되돌릴 수 없습니다!',
+    '모든 엔트리 작품에 저장된 변수/리스트 데이터가 삭제됩니다.\n\n이 작업은 되돌릴 수 없습니다!',
     async () => {
       const tab = await getCurrentTab();
       const count = await removeAllSaveKeysFromAllFrames(tab.id);

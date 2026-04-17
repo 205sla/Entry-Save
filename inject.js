@@ -9,6 +9,8 @@
  *    1) 작품 로딩 시 localStorage에서 저장된 데이터를 읽어 복원 (Load)
  *    2) '@저장' 함수 호출 시 '@' 변수/리스트를 localStorage에 저장 (Save)
  *    3) '@확장프로그램' 변수를 1로 설정하여 설치 유무를 알림
+ *    4) '@가져오기' 함수 호출 시 파라미터의 평가된 프로젝트 ID를 이용해
+ *       해당 작품의 저장 데이터를 현재 작품의 동일 이름(@) 변수/리스트에 적용
  * ============================================================
  */
 
@@ -20,6 +22,7 @@
   // ─────────────────────────────────────────────
   const PREFIX = '@';                      // 추적 대상 변수/리스트 접두사
   const SAVE_FUNC_NAME = '@저장';          // 저장 트리거 함수 이름
+  const LOAD_FUNC_NAME = '@가져오기';      // 교차 작품 데이터 가져오기 트리거
   const STATUS_VAR_NAME = '@확장프로그램'; // 확장프로그램 설치 확인 변수
   const STORAGE_KEY_PREFIX = ESM.STORAGE_KEY_PREFIX;
 
@@ -38,6 +41,18 @@
 
   // 활성 폴링 타이머 (정리용)
   let enginePollTimer = null;
+
+  // toggleRun 후킹 원본 참조 (URL 변경 시 복구용)
+  let originalToggleRun = null;
+  let hookedEngine = null;
+
+  // '@저장' 함수 블록 후킹 원본 참조 (URL 변경 시 복구용)
+  let hookedSaveBlockKey = null;
+  let originalSaveBlockFunc = null;
+
+  // '@가져오기' 함수 블록 후킹 원본 참조
+  let hookedLoadBlockKey = null;
+  let originalLoadBlockFunc = null;
 
   // 페이지 타입 판별 (/project/ 및 /iframe/ 둘 다 작품 실행 페이지)
   const isProjectPage = location.pathname.startsWith('/project/') || location.pathname.startsWith('/iframe/');
@@ -206,50 +221,130 @@
   //  Load (불러오기)
   // ─────────────────────────────────────────────
 
-  function loadData() {
-    try {
-      const key = getStorageKey();
-      const raw = localStorage.getItem(key);
-      if (!raw) {
+  /**
+   * 저장된 변수 값이 복원 가능한 primitive 타입인지 검증합니다.
+   * Entry의 변수는 number/string만 허용하며 객체/배열/함수는 주입 위험.
+   */
+  function isValidVariableValue(value) {
+    const t = typeof value;
+    return value === null || t === 'number' || t === 'string' || t === 'boolean';
+  }
+
+  /**
+   * 리스트 항목이 복원 가능한 primitive인지 검증합니다.
+   */
+  function isValidListItem(item) {
+    const t = typeof item;
+    return item === null || t === 'number' || t === 'string' || t === 'boolean';
+  }
+
+  /**
+   * @param {string} [sourceProjectId] - 생략 시 현재 프로젝트. 지정 시 해당 작품의 저장본을 이름 매칭으로 적용.
+   */
+  function loadData(sourceProjectId) {
+    const key = sourceProjectId
+      ? (STORAGE_KEY_PREFIX + sourceProjectId)
+      : getStorageKey();
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      if (sourceProjectId) {
+        console.warn(`[Entry Save Manager] '@가져오기': 소스 작품(${sourceProjectId})의 저장 데이터 없음`);
+      } else {
         console.log('[Entry Save Manager] 저장된 데이터 없음:', key);
-        return;
       }
+      return;
+    }
 
-      const data = JSON.parse(raw);
-      console.log('[Entry Save Manager] 저장된 데이터 로드:', data);
+    // ── JSON 파싱 ──
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (e) {
+      console.error('[Entry Save Manager] 저장 데이터 파싱 실패 — 손상된 데이터일 수 있습니다:', e);
+      return;
+    }
 
-      const container = Entry.variableContainer;
+    // ── 구조 검증 ──
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      console.error('[Entry Save Manager] 잘못된 데이터 형식(object 아님):', data);
+      return;
+    }
 
-      // ── 변수 복원 ──
-      if (data.variables && Array.isArray(data.variables)) {
-        const currentVars = container.variables_ || [];
-        data.variables.forEach((saved) => {
+    console.log('[Entry Save Manager] 저장된 데이터 로드:', data);
+
+    const container = Entry.variableContainer;
+    let varOk = 0, varSkip = 0, listOk = 0, listSkip = 0;
+
+    // ── 변수 복원 ──
+    if (Array.isArray(data.variables)) {
+      const currentVars = container.variables_ || [];
+      data.variables.forEach((saved) => {
+        try {
+          if (!saved || typeof saved !== 'object') {
+            varSkip++; return;
+          }
+          if (typeof saved.name !== 'string' || !saved.name.startsWith(PREFIX)) {
+            debug('변수 스킵 — 이름 유효성 실패:', saved && saved.name);
+            varSkip++; return;
+          }
+          if (!isValidVariableValue(saved.value)) {
+            console.warn(`[Entry Save Manager] 변수 스킵 — 허용되지 않는 값 타입: ${saved.name} (${typeof saved.value})`);
+            varSkip++; return;
+          }
           const target = currentVars.find(
             (v) => v.id_ === saved.id || v.name_ === saved.name
           );
-          if (target) {
-            target.setValue(saved.value);
-            console.log(`[Entry Save Manager] 변수 복원: ${saved.name} = ${saved.value}`);
+          if (!target) { varSkip++; return; }
+          if (typeof target.setValue !== 'function') {
+            debug('변수 스킵 — setValue 없음:', saved.name);
+            varSkip++; return;
           }
-        });
-      }
+          target.setValue(saved.value);
+          varOk++;
+          console.log(`[Entry Save Manager] 변수 복원: ${saved.name} = ${saved.value}`);
+        } catch (e) {
+          console.error(`[Entry Save Manager] 변수 복원 실패 (${saved && saved.name}):`, e);
+          varSkip++;
+        }
+      });
+    }
 
-      // ── 리스트 복원 ──
-      if (data.lists && Array.isArray(data.lists)) {
-        const currentLists = container.lists_ || [];
-        data.lists.forEach((saved) => {
+    // ── 리스트 복원 ──
+    if (Array.isArray(data.lists)) {
+      const currentLists = container.lists_ || [];
+      data.lists.forEach((saved) => {
+        try {
+          if (!saved || typeof saved !== 'object') {
+            listSkip++; return;
+          }
+          if (typeof saved.name !== 'string' || !saved.name.startsWith(PREFIX)) {
+            debug('리스트 스킵 — 이름 유효성 실패:', saved && saved.name);
+            listSkip++; return;
+          }
+          if (!Array.isArray(saved.array)) {
+            console.warn(`[Entry Save Manager] 리스트 스킵 — array 필드가 배열 아님: ${saved.name}`);
+            listSkip++; return;
+          }
           const target = currentLists.find(
             (l) => l.id_ === saved.id || l.name_ === saved.name
           );
-          if (target && saved.array) {
-            target.array_ = saved.array.map((item) => ({ data: item }));
-            console.log(`[Entry Save Manager] 리스트 복원: ${saved.name} (${saved.array.length}개 항목)`);
+          if (!target) { listSkip++; return; }
+
+          const sanitized = saved.array.filter(isValidListItem);
+          if (sanitized.length !== saved.array.length) {
+            console.warn(`[Entry Save Manager] 리스트 ${saved.name}: 허용되지 않는 타입 ${saved.array.length - sanitized.length}개 제거`);
           }
-        });
-      }
-    } catch (e) {
-      console.error('[Entry Save Manager] 로드 실패:', e);
+          target.array_ = sanitized.map((item) => ({ data: item }));
+          listOk++;
+          console.log(`[Entry Save Manager] 리스트 복원: ${saved.name} (${sanitized.length}개 항목)`);
+        } catch (e) {
+          console.error(`[Entry Save Manager] 리스트 복원 실패 (${saved && saved.name}):`, e);
+          listSkip++;
+        }
+      });
     }
+
+    debug(`로드 결과 — 변수: ${varOk} 복원 / ${varSkip} 스킵, 리스트: ${listOk} 복원 / ${listSkip} 스킵`);
   }
 
   // ─────────────────────────────────────────────
@@ -276,7 +371,7 @@
    * Entry 엔진의 상태 변화를 지속적으로 감시합니다.
    * 엔진이 'run' 상태로 전환될 때마다 loadData()를 호출합니다.
    * - /ws/ 페이지: Play 버튼 클릭 시 (toggleRun 후킹)
-   * - /project/ 페이지: 자동 실행 및 재실행 감지 (폴링)
+   * - /project/ 페이지: 자동 실행 시 초기 'run' 감지 + 재실행 감지 (폴링)
    * 정지 후 재실행 시에도 매번 데이터를 불러옵니다.
    */
   function watchEngineState() {
@@ -288,11 +383,23 @@
     let prevState = Entry.engine.state || 'stop';
     debug(`watchEngineState 시작 — 초기 상태: ${prevState}`);
 
+    // ── 초기 진입 시 이미 'run' 상태인 경우 (예: /project/ 자동 실행) ──
+    //  폴링/toggleRun 후킹으로는 전이를 감지할 수 없으므로 즉시 초기 로드 수행
+    if (prevState === 'run') {
+      console.log('[Entry Save Manager] 진입 시 이미 실행 중 — 초기 로드');
+      setTimeout(() => {
+        loadData();
+        setExtensionStatusFlag();
+      }, STATE_CHECK_DELAY);
+    }
+
     // ── 방법 1: toggleRun 후킹 (즉각 감지) ──
-    if (Entry.engine.toggleRun) {
-      const originalToggleRun = Entry.engine.toggleRun.bind(Entry.engine);
+    if (Entry.engine.toggleRun && !originalToggleRun) {
+      originalToggleRun = Entry.engine.toggleRun;
+      hookedEngine = Entry.engine;
+      const boundOriginal = originalToggleRun.bind(Entry.engine);
       Entry.engine.toggleRun = function (...args) {
-        const result = originalToggleRun(...args);
+        const result = boundOriginal(...args);
 
         // toggleRun 후 약간의 딜레이를 두고 상태 확인
         setTimeout(() => {
@@ -351,25 +458,23 @@
   }
 
   /**
-   * '@저장' 함수의 ID를 찾습니다.
+   * 주어진 이름과 일치하는 Entry 함수의 ID를 찾습니다.
    * extractFunctionName으로 먼저 시도하고, 실패 시 JSON 직접 검색합니다.
    */
-  function findSaveFunctionId() {
-    const functions = Entry.variableContainer.functions_;
+  function findFunctionIdByName(targetName) {
+    const functions = Entry.variableContainer && Entry.variableContainer.functions_;
     if (!functions) {
       debug('functions_ 없음');
       return null;
     }
 
     const funcEntries = Object.entries(functions);
-    debug('등록된 함수 개수:', funcEntries.length);
 
-    // 방법 1: 이름 추출
+    // 방법 1: 이름 추출 매칭
     for (const [funcId, funcObj] of funcEntries) {
       const name = extractFunctionName(funcObj);
-      debug(`함수 — id: ${funcId}, 이름: "${name}"`);
-      if (name === SAVE_FUNC_NAME) {
-        debug(`이름 매칭으로 "@저장" 발견: id=${funcId}`);
+      if (name === targetName) {
+        debug(`이름 매칭: "${targetName}" → id=${funcId}`);
         return funcId;
       }
     }
@@ -377,49 +482,192 @@
     // 방법 2: JSON 직접 검색
     for (const [funcId, funcObj] of funcEntries) {
       try {
-        const jsonStr = JSON.stringify(funcObj.content);
-        if (jsonStr.includes(SAVE_FUNC_NAME)) {
-          debug(`JSON 검색으로 "@저장" 발견: id=${funcId}`);
+        if (JSON.stringify(funcObj.content).includes(targetName)) {
+          debug(`JSON 검색: "${targetName}" → id=${funcId}`);
           return funcId;
         }
       } catch (e) { /* ignore */ }
     }
 
-    debug('"@저장" 함수를 찾지 못했습니다.');
+    debug(`"${targetName}" 함수를 찾지 못했습니다.`);
     return null;
   }
 
   /**
-   * Entry의 함수 시스템을 후킹하여 '@저장' 함수 호출 시 saveData()를 실행합니다.
-   * 함수 블록이 아직 등록되지 않았으면 폴링으로 재시도합니다.
+   * 함수 정의의 paramMap에서 stringParam_* 접두사 키를 우선 추출합니다.
+   * 실측: Entry.block['func_<id>']에는 paramMap이 없으므로
+   *       variableContainer에서 가져와야 합니다.
    */
-  async function hookFunctionCalls() {
-    for (let attempt = 1; attempt <= HOOK_RETRY_MAX; attempt++) {
-      debug(`hookFunctionCalls() 시도 #${attempt}`);
+  function getFuncParamKey(funcId) {
+    const vc = Entry.variableContainer;
+    const fn = (vc && typeof vc.getFunction === 'function')
+      ? vc.getFunction(funcId)
+      : (vc && vc.functions_ && vc.functions_[funcId]);
+    if (!fn || !fn.paramMap) return { paramMap: null, paramKey: null };
+    const keys = Object.keys(fn.paramMap);
+    const paramKey = keys.find(k => k.startsWith('stringParam')) || keys[0] || null;
+    return { paramMap: fn.paramMap, paramKey };
+  }
 
-      const saveFuncId = findSaveFunctionId();
-      if (saveFuncId) {
-        const blockKey = 'func_' + saveFuncId;
-        debug(`함수 블록 키: ${blockKey}`);
+  /**
+   * 호출 블록 인스턴스(this)에서 평가된 인자 값을 안전하게 추출합니다.
+   * Entry 런타임이 this.values에 평가 완료된 인자 배열을 채워둔 상태를 이용.
+   */
+  function readCallBlockArg(callBlockInstance, paramMap, paramKey) {
+    if (!callBlockInstance || !paramMap || !paramKey) return null;
+    const idx = paramMap[paramKey];
+    if (typeof idx !== 'number') return null;
+    const values = callBlockInstance.values;
+    if (!values || idx >= values.length) return null;
+    const v = values[idx];
+    if (v === null || v === undefined) return null;
+    return String(v).trim();
+  }
 
-        if (Entry.block && Entry.block[blockKey] && Entry.block[blockKey].func) {
-          const origFunc = Entry.block[blockKey].func;
-          Entry.block[blockKey].func = function (sprite, script) {
-            console.log('[Entry Save Manager] "@저장" 함수 호출 감지!');
-            saveData();
-            return origFunc.call(this, sprite, script);
-          };
-          console.log(`[Entry Save Manager] "@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
-          return;
-        } else {
-          debug(`Entry.block["${blockKey}"] 또는 .func가 아직 없음`);
+  /**
+   * 블록 트리에서 호출 블록의 리터럴 파라미터만 잡는 best-effort fallback.
+   * 변수/계산식이 꽂힌 경우엔 null. this.values가 비어있는 예외 상황용.
+   */
+  function readCallBlockLiteralStatic(blockType) {
+    try {
+      const objs = Entry.container && Entry.container.objects_;
+      if (!objs) return null;
+      for (const o of objs) {
+        const threads = o.script && typeof o.script.getThreads === 'function'
+          ? o.script.getThreads() : [];
+        for (const t of threads) {
+          const blocks = typeof t.getBlocks === 'function' ? t.getBlocks() : [];
+          for (const b of blocks) {
+            if (b.type === blockType) {
+              const literal = b.params && b.params[0] && b.params[0].params && b.params[0].params[0];
+              if (literal != null) return String(literal).trim();
+            }
+          }
         }
       }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function isValidProjectId(id) {
+    return typeof id === 'string' && /^[a-f0-9]{8,}$/i.test(id);
+  }
+
+  /**
+   * '@저장' 함수 블록을 후킹합니다. 성공 시 true.
+   * 이미 다른 인스턴스가 후킹했거나(signature 체크) 스키마가 준비 안 되면 스킵.
+   */
+  function tryHookSave(funcId) {
+    const blockKey = 'func_' + funcId;
+    const schema = Entry.block && Entry.block[blockKey];
+    if (!schema || !schema.func) return false;
+    if (schema.func._isSaveMgrHook) {
+      debug(`@저장: 이미 다른 인스턴스가 후킹 — ${blockKey}`);
+      return true;
+    }
+    if (hookedSaveBlockKey === blockKey && originalSaveBlockFunc) return true;
+
+    const origFunc = schema.func;
+    hookedSaveBlockKey = blockKey;
+    originalSaveBlockFunc = origFunc;
+
+    const wrapper = function (sprite, script) {
+      console.log('[Entry Save Manager] "@저장" 함수 호출 감지!');
+      saveData();
+      return origFunc.call(this, sprite, script);
+    };
+    wrapper._isSaveMgrHook = true;
+    schema.func = wrapper;
+    console.log(`[Entry Save Manager] "@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
+    return true;
+  }
+
+  /**
+   * '@가져오기' 함수 블록을 후킹합니다. 성공 시 true.
+   */
+  function tryHookLoad(funcId) {
+    const blockKey = 'func_' + funcId;
+    const schema = Entry.block && Entry.block[blockKey];
+    if (!schema || !schema.func) return false;
+    if (schema.func._isSaveMgrHook) {
+      debug(`@가져오기: 이미 다른 인스턴스가 후킹 — ${blockKey}`);
+      return true;
+    }
+    if (hookedLoadBlockKey === blockKey && originalLoadBlockFunc) return true;
+
+    const { paramMap, paramKey } = getFuncParamKey(funcId);
+    if (!paramMap || !paramKey) {
+      console.warn('[Entry Save Manager] "@가져오기" 함수의 paramMap 없음 — 동작 불가');
+      return false;
+    }
+
+    const origFunc = schema.func;
+    hookedLoadBlockKey = blockKey;
+    originalLoadBlockFunc = origFunc;
+
+    const wrapper = function (sprite, script) {
+      try {
+        // 1차: 호출 블록 인스턴스의 평가된 인자
+        let sourceId = readCallBlockArg(this, paramMap, paramKey);
+        // 2차: 정적 리터럴 fallback
+        if (sourceId == null) {
+          sourceId = readCallBlockLiteralStatic(blockKey);
+          if (sourceId != null) debug('"@가져오기": this.values 비어있음 — 정적 리터럴 사용');
+        }
+
+        if (!sourceId) {
+          console.warn('[Entry Save Manager] "@가져오기": 파라미터 값을 읽을 수 없음');
+        } else if (!isValidProjectId(sourceId)) {
+          console.warn(`[Entry Save Manager] "@가져오기": 유효하지 않은 프로젝트 ID — "${sourceId}"`);
+        } else if (sourceId === getProjectId()) {
+          debug('"@가져오기": 자기 자신 ID → 현재 저장본 재로드');
+          loadData();
+        } else {
+          console.log(`[Entry Save Manager] "@가져오기" 호출 — 소스 ID: ${sourceId}`);
+          loadData(sourceId);
+        }
+      } catch (e) {
+        console.error('[Entry Save Manager] "@가져오기" 처리 오류:', e);
+      }
+      return origFunc.call(this, sprite, script);
+    };
+    wrapper._isSaveMgrHook = true;
+    schema.func = wrapper;
+    console.log(`[Entry Save Manager] "@가져오기" 함수 블록 (${blockKey}, param=${paramKey}) 후킹 완료 ✓`);
+    return true;
+  }
+
+  /**
+   * '@저장' / '@가져오기' 함수 호출을 후킹합니다.
+   * 함수 블록이 아직 등록되지 않았으면 폴링으로 재시도합니다.
+   * 둘 중 하나만 있어도 정상 동작합니다.
+   */
+  async function hookFunctionCalls() {
+    let saveDone = !!hookedSaveBlockKey;
+    let loadDone = !!hookedLoadBlockKey;
+
+    for (let attempt = 1; attempt <= HOOK_RETRY_MAX; attempt++) {
+      debug(`hookFunctionCalls() 시도 #${attempt} — save:${saveDone}, load:${loadDone}`);
+
+      if (!saveDone) {
+        const id = findFunctionIdByName(SAVE_FUNC_NAME);
+        if (id && tryHookSave(id)) saveDone = true;
+      }
+      if (!loadDone) {
+        const id = findFunctionIdByName(LOAD_FUNC_NAME);
+        if (id && tryHookLoad(id)) loadDone = true;
+      }
+      if (saveDone && loadDone) return;
 
       await new Promise(r => setTimeout(r, POLL_INTERVAL));
     }
 
-    console.error('[Entry Save Manager] "@저장" 함수 후킹 최대 재시도 초과');
+    if (!saveDone) {
+      console.error('[Entry Save Manager] "@저장" 함수 후킹 최대 재시도 초과');
+    }
+    if (!loadDone) {
+      console.warn('[Entry Save Manager] "@가져오기" 미후킹 (함수 없거나 스키마 문제 — 선택 기능이므로 무시 가능)');
+    }
     if (DEBUG && Entry.block) {
       const funcKeys = Object.keys(Entry.block).filter(k => k.startsWith('func_'));
       debug('최종 Entry.block func_ 키:', funcKeys);
@@ -437,11 +685,58 @@
     const data = event.data;
     if (!data || data.type !== 'ENTRY_SAVE_MANAGER' || data.action !== 'URL_CHANGED') return;
 
-    debug('URL 변경 감지 — 폴링 정리');
+    debug('URL 변경 감지 — 폴링 및 후킹 정리');
     if (enginePollTimer) {
       clearInterval(enginePollTimer);
       enginePollTimer = null;
     }
+
+    // toggleRun 후킹 복구
+    if (hookedEngine && originalToggleRun) {
+      try {
+        hookedEngine.toggleRun = originalToggleRun;
+        debug('toggleRun 원본 복구 완료');
+      } catch (e) {
+        debug('toggleRun 복구 실패:', e);
+      }
+      hookedEngine = null;
+      originalToggleRun = null;
+    }
+
+    // '@저장' 함수 블록 후킹 복구 (signature 체크로 자기 래퍼만 복구)
+    if (hookedSaveBlockKey && originalSaveBlockFunc && window.Entry && Entry.block && Entry.block[hookedSaveBlockKey]) {
+      try {
+        const curFunc = Entry.block[hookedSaveBlockKey].func;
+        if (curFunc && curFunc._isSaveMgrHook) {
+          Entry.block[hookedSaveBlockKey].func = originalSaveBlockFunc;
+          debug(`'@저장' 블록(${hookedSaveBlockKey}) 원본 복구 완료`);
+        } else {
+          debug(`'@저장' 블록(${hookedSaveBlockKey}) 이미 교체됨 — 복구 스킵`);
+        }
+      } catch (e) {
+        debug('@저장 블록 복구 실패:', e);
+      }
+    }
+    hookedSaveBlockKey = null;
+    originalSaveBlockFunc = null;
+
+    // '@가져오기' 함수 블록 후킹 복구
+    if (hookedLoadBlockKey && originalLoadBlockFunc && window.Entry && Entry.block && Entry.block[hookedLoadBlockKey]) {
+      try {
+        const curFunc = Entry.block[hookedLoadBlockKey].func;
+        if (curFunc && curFunc._isSaveMgrHook) {
+          Entry.block[hookedLoadBlockKey].func = originalLoadBlockFunc;
+          debug(`'@가져오기' 블록(${hookedLoadBlockKey}) 원본 복구 완료`);
+        } else {
+          debug(`'@가져오기' 블록(${hookedLoadBlockKey}) 이미 교체됨 — 복구 스킵`);
+        }
+      } catch (e) {
+        debug('@가져오기 블록 복구 실패:', e);
+      }
+    }
+    hookedLoadBlockKey = null;
+    originalLoadBlockFunc = null;
+
     window.__entrySaveManagerLoaded = false;
   });
 
