@@ -2,7 +2,7 @@
 
 > 엔트리(Entry) 작품의 변수·리스트 데이터를 브라우저에 저장·복원하고, 다른 작품의 세이브까지 불러올 수 있게 해 주는 Chrome 확장 프로그램입니다.
 
-![version](https://img.shields.io/badge/version-1.2.0-blue)
+![version](https://img.shields.io/badge/version-1.2.1-blue)
 ![manifest](https://img.shields.io/badge/manifest-v3-green)
 ![platform](https://img.shields.io/badge/platform-Chrome-brightgreen)
 
@@ -141,7 +141,8 @@ https://playentry.org/project/69e1cf125ccad8d458628c6f
 
 ## 📦 버전
 
-현재: **v1.2.0**
+현재: **v1.2.1**
 
+- v1.2.1 — 팝업 푸터에 "도구.엔트리.org" 패밀리 사이트 링크 추가
 - v1.2.0 — `@가져오기` 교차 작품 불러오기, 타입 검증, 후킹 signature 가드, `/project/` 초기 실행 대응
 - v1.0.x — 초기 공개 (`@저장`, `@확장프로그램`, 자동 불러오기)
