@@ -225,3 +225,79 @@ body {
 .btn-danger:hover {
   background: #E03131;
 }
+
+/* ─────────────────────────────────────────────
+   ToolsFamilyLink — "도구.엔트리.org" 패밀리 프로모
+   원본: ent2/components/ToolsFamilyLink.tsx
+   프로젝트 brand 팔레트:
+     brand-500: #5094FA (primary)
+     brand-600: #4281E2 (hover)
+     brand-700: #3561B8 (deeper hover)
+     brand-50 : #EDF4FF (hover bg)
+───────────────────────────────────────────── */
+.tools-family-wrap {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.tools-family-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  border: 1px solid #E9ECEF; /* slate-200 equivalent */
+  background: #ffffff;
+  color: #495057;            /* slate-600 equivalent */
+  font-size: 11px;
+  font-weight: 400;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.2s, background-color 0.2s, color 0.2s;
+  white-space: nowrap;
+}
+
+.tools-family-link:hover {
+  border-color: #5094FA;     /* brand-500 */
+  background: #EDF4FF;       /* brand-50 */
+  color: #3561B8;            /* brand-700 */
+}
+
+.tools-family-sep {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: #E9ECEF;       /* slate-200 */
+  transition: background-color 0.2s;
+}
+
+.tools-family-link:hover .tools-family-sep {
+  background: rgba(80, 148, 250, 0.4); /* brand-500/40 */
+}
+
+.tools-family-brand {
+  font-weight: 700;
+  color: #4281E2;            /* brand-600 */
+  transition: color 0.2s;
+}
+
+.tools-family-link:hover .tools-family-brand {
+  color: #3561B8;            /* brand-700 */
+}
+
+.tools-family-arrow {
+  color: #4281E2;            /* brand-600 */
+  transition: transform 0.2s, color 0.2s;
+  display: inline-block;
+}
+
+.tools-family-link:hover .tools-family-arrow {
+  transform: translateX(2px);
+  color: #3561B8;            /* brand-700 */
+}
+
+.tools-family-link:focus-visible {
+  outline: 2px solid #5094FA;
+  outline-offset: 2px;
+}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Entry Save Manager",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "엔트리 작품의 '@' 변수/리스트 데이터를 로컬에 저장하고 불러오는 확장 프로그램",
   "icons": {
     "48": "icon48.png",
