@@ -36,6 +36,27 @@
     <button class="btn btn-reset-all" id="btnResetAll" disabled>
       모든 데이터 초기화
     </button>
+
+    <!--
+      "도구.엔트리.org" 패밀리 사이트 프로모 링크.
+      원본: ent2/components/ToolsFamilyLink.tsx (React+Tailwind)
+      본 프로젝트는 vanilla HTML/CSS이므로 동등 구조/동작으로 이식.
+      수정 시 원본을 먼저 변경해 전 서비스 싱크할 것.
+    -->
+    <div class="tools-family-wrap">
+      <a
+        href="https://도구.엔트리.org"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="도구.엔트리.org 에서 다른 도구 보러가기"
+        class="tools-family-link"
+      >
+        <span>다른 도구 보러가기</span>
+        <span aria-hidden="true" class="tools-family-sep"></span>
+        <span class="tools-family-brand">도구.엔트리.org</span>
+        <span aria-hidden="true" class="tools-family-arrow">→</span>
+      </a>
+    </div>
   </div>
 
   <div class="toast" id="toast">
