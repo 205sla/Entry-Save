@@ -30,6 +30,7 @@ const btnConfirmOk = document.getElementById('btnConfirmOk');
 // ---------------------------------
 
 let currentProjectId = null;
+let currentPageType = null; // 'ws' | 'project' | null
 
 async function getCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -39,6 +40,14 @@ async function getCurrentTab() {
 function extractProjectId(url) {
   try {
     return ESM.extractProjectId(new URL(url).pathname);
+  } catch (e) {
+    return null;
+  }
+}
+
+function getPageTypeFromUrl(url) {
+  try {
+    return ESM.getPageTypeFromPathname(new URL(url).pathname);
   } catch (e) {
     return null;
   }
@@ -124,6 +133,7 @@ async function updateUI() {
   pageStatusEl.classList.add('active');
 
   currentProjectId = extractProjectId(tab.url);
+  currentPageType = getPageTypeFromUrl(tab.url);
   if (isNewProject(tab.url)) {
     projectIdEl.textContent = '작품을 한 번 저장해 주세요';
   } else {
@@ -142,8 +152,10 @@ async function updateUI() {
       dataStatusEl.textContent = `${keys.length}개 작품`;
       dataStatusEl.classList.add('active');
 
-      // 현재 작품 데이터 존재 여부 확인
-      const currentKey = currentProjectId ? STORAGE_KEY_PREFIX + currentProjectId : null;
+      // 현재 페이지의 namespace에 해당하는 키만 체크 (ws ≠ project)
+      const currentKey = (currentProjectId && currentPageType)
+        ? ESM.buildStorageKey(currentPageType, currentProjectId)
+        : null;
       btnResetCurrent.disabled = !currentKey || !keys.includes(currentKey);
       btnResetAll.disabled = false;
     }
@@ -184,14 +196,15 @@ function hideConfirm() {
 // ---------------------------------
 
 btnResetCurrent.addEventListener('click', () => {
+  const pageLabel = currentPageType === 'project' ? '작품보기' : '만들기';
   showConfirm(
     '현재 작품 데이터 초기화',
-    `프로젝트 ID: ${currentProjectId}\n\n이 작품에 저장된 변수/리스트 데이터가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.`,
+    `프로젝트 ID: ${currentProjectId}\n페이지: ${pageLabel}\n\n이 페이지에서 저장된 변수/리스트 데이터가 삭제됩니다. (반대편 페이지의 저장본은 유지됩니다.) 이 작업은 되돌릴 수 없습니다.`,
     async () => {
       const tab = await getCurrentTab();
-      const key = STORAGE_KEY_PREFIX + currentProjectId;
+      const key = ESM.buildStorageKey(currentPageType, currentProjectId);
       await removeKeyFromAllFrames(tab.id, key);
-      showToast('초기화 완료', `현재 작품의 데이터가 삭제되었습니다.`);
+      showToast('초기화 완료', `${pageLabel} 페이지 데이터가 삭제되었습니다.`);
       await updateUI();
     }
   );

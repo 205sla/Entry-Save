@@ -33,7 +33,12 @@
 
   // 디버그 로깅 (배포 시 false로 설정)
   const DEBUG = false;
-  function debug(...args) { if (DEBUG) console.log('[ESM]', ...args); }
+  // 일반 정보성 로그 — [Entry Save Manager] prefix
+  function info(...args) { if (DEBUG) console.log('[Entry Save Manager]', ...args); }
+  // 내부 진단 로그 — [ESM] prefix + frame pathname
+  function debug(...args) { if (DEBUG) console.log('[ESM]', `[${location.pathname}]`, ...args); }
+  // namespace/핸드셰이크 추적 로그
+  function dlog(...args) { if (DEBUG) console.log('[ESM-DBG][inject]', `[${location.pathname}]`, ...args); }
 
   // 중복 초기화 방지 플래그
   if (window.__entrySaveManagerLoaded) return;
@@ -54,9 +59,71 @@
   let hookedLoadBlockKey = null;
   let originalLoadBlockFunc = null;
 
-  // 페이지 타입 판별 (/project/ 및 /iframe/ 둘 다 작품 실행 페이지)
-  const isProjectPage = location.pathname.startsWith('/project/') || location.pathname.startsWith('/iframe/');
+  // 페이지 타입 판별 — /project/, /iframe/, /noframe/ 모두 작품 실행 페이지
+  // (/noframe/은 자식 iframe 없이 top frame이 곧 runtime인 변형)
+  const isProjectPage = location.pathname.startsWith('/project/')
+                     || location.pathname.startsWith('/iframe/')
+                     || location.pathname.startsWith('/noframe/');
   const isWorkspacePage = location.pathname.startsWith('/ws/');
+
+  // ─────────────────────────────────────────────
+  //  Storage namespace (pageType) 결정
+  // ─────────────────────────────────────────────
+  //  /project/ → 'project' → entry_save_<id>      (기본 키 = prefix 없음)
+  //  /ws/      → 'ws'      → entry_save_ws_<id>   (워크스페이스 전용 prefix)
+  //  /iframe/  → 부모로부터 postMessage로 받음 (응답 전엔 'project' 폴백 = 기본 키)
+  //
+  //  자식 iframe이 부모의 pageType을 알아야 정확한 키로 저장/로드할 수 있으므로
+  //  REQUEST_PAGE_TYPE → PAGE_TYPE 핸드셰이크를 수행합니다.
+  let pageType = ESM.getPageTypeFromPathname(location.pathname);
+  let pageTypeResolved = pageType !== null;
+  let pageTypeHandshakeTimer = null;
+
+  dlog('IIFE 시작 — top:', window.top === window, 'parent===self:', window.parent === window,
+       '| 초기 pageType:', pageType, 'resolved:', pageTypeResolved, 'href:', location.href);
+
+  function requestPageTypeFromParent() {
+    if (window.parent === window) {
+      dlog('requestPageTypeFromParent — 부모 없음 (top frame), 스킵');
+      return;
+    }
+    try {
+      window.parent.postMessage(
+        { type: 'ENTRY_SAVE_MANAGER', action: 'REQUEST_PAGE_TYPE' },
+        '*'
+      );
+      dlog('REQUEST_PAGE_TYPE → 부모 frame에 전송');
+    } catch (e) {
+      dlog('REQUEST_PAGE_TYPE 전송 실패:', e);
+    }
+  }
+
+  // 부모가 없는 경우(top frame인데 /ws/도 /project/도 아님)에는 핸드셰이크 불필요 → 'ws' 폴백
+  if (!pageTypeResolved && window.parent !== window) {
+    dlog('pageType 미해결 → 핸드셰이크 시작');
+    requestPageTypeFromParent();
+    let handshakeAttempts = 0;
+    const HANDSHAKE_MAX_ATTEMPTS = 20; // 500ms × 20 = 10초까지 시도
+    pageTypeHandshakeTimer = setInterval(() => {
+      if (pageTypeResolved || handshakeAttempts >= HANDSHAKE_MAX_ATTEMPTS) {
+        clearInterval(pageTypeHandshakeTimer);
+        pageTypeHandshakeTimer = null;
+        if (!pageTypeResolved) {
+          dlog('핸드셰이크 타임아웃 (' + HANDSHAKE_MAX_ATTEMPTS + '회 시도) — \'ws\' 폴백 사용 예정');
+        } else {
+          dlog('핸드셰이크 성공 후 타이머 종료');
+        }
+        return;
+      }
+      handshakeAttempts++;
+      dlog('핸드셰이크 재시도 #' + handshakeAttempts);
+      requestPageTypeFromParent();
+    }, 500);
+  } else if (!pageTypeResolved) {
+    dlog('pageType 미해결이지만 부모 없음 → \'ws\' 폴백 사용');
+  } else {
+    dlog('pageType 자기 pathname에서 해결 → 핸드셰이크 불필요');
+  }
 
   /**
    * URL 경로에서 프로젝트 ID를 추출합니다.
@@ -73,7 +140,7 @@
     return (window.Entry && window.Entry.projectId) || getProjectIdFromUrl();
   }
 
-  console.log('[Entry Save Manager] inject.js 로드됨 (MAIN world)');
+  info('inject.js 로드됨 (MAIN world)');
   debug(`페이지 타입: ${isProjectPage ? '/project/' : isWorkspacePage ? '/ws/' : '기타'} — URL: ${location.href}`);
 
   // ─────────────────────────────────────────────
@@ -86,8 +153,11 @@
    * @returns {Promise<void>}
    */
   function waitForEntry() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let pollCount = 0;
+      // top frame(/ws/, /project/)에는 Entry가 없는 경우가 많음 — 자식 iframe만 동작.
+      // 일정 횟수 후 포기해 무한 폴링/콘솔 노이즈를 막는다.
+      const MAX_POLLS = 60; // 60 × 500ms = 30초
       const check = () => {
         pollCount++;
 
@@ -100,6 +170,12 @@
 
         if (pollCount <= 5 || pollCount % 10 === 0) {
           debug(`waitForEntry 폴링 #${pollCount} — Entry:${hasEntry}, vc:${hasVC}, pid:${hasPid}(${getProjectId()||""}), engine:${hasEngine}, block:${hasBlock}`);
+        }
+
+        if (pollCount >= MAX_POLLS && !hasEntry) {
+          debug(`waitForEntry 포기 (${pollCount}회 폴링) — 이 frame에 Entry 없음. 자식 iframe만 동작 예상.`);
+          reject(new Error('Entry not found in this frame'));
+          return;
         }
 
         // 5번째 폴링에서 진단 정보 출력
@@ -151,11 +227,16 @@
   }
 
   /**
-   * 현재 프로젝트에 대한 localStorage 키를 반환합니다.
-   * @returns {string} 예: "entry_save_abc123"
+   * 현재 프로젝트·페이지 타입에 대한 localStorage 키를 반환합니다.
+   *  - /project/ → "entry_save_<id>"      (기본, prefix 없음)
+   *  - /ws/      → "entry_save_ws_<id>"   (워크스페이스 전용)
+   *  - pageType 미해결 시 'project' 폴백 — 기본 키와 일치(=대다수 사용자/플레이어 시나리오)
    */
   function getStorageKey() {
-    return STORAGE_KEY_PREFIX + getProjectId();
+    const pt = pageTypeResolved ? pageType : 'project';
+    const key = ESM.buildStorageKey(pt, getProjectId());
+    dlog('getStorageKey() →', key, '(pt:', pt, 'resolved:', pageTypeResolved + ', pid:', getProjectId() + ')');
+    return key;
   }
 
   // ─────────────────────────────────────────────
@@ -193,7 +274,7 @@
   // ─────────────────────────────────────────────
 
   function saveData() {
-    debug('===== saveData() 호출됨 =====');
+    dlog('===== saveData() 호출됨 =====');
     try {
       const variables = getTargetVariables();
       const lists = getTargetLists();
@@ -209,11 +290,12 @@
 
       // 저장 검증
       const verify = localStorage.getItem(key);
-      debug('저장 검증 — 일치:', verify === jsonStr, '길이:', jsonStr.length);
-      console.log('[Entry Save Manager] 데이터 저장 완료:', key);
+      dlog('saveData 완료 — key:', key, '일치:', verify === jsonStr, '바이트:', jsonStr.length,
+           '변수:', variables.length, '리스트:', lists.length);
+      info('데이터 저장 완료:', key);
     } catch (e) {
       console.error('[Entry Save Manager] 저장 실패:', e);
-      debug('저장 실패 스택:', e.stack);
+      dlog('저장 실패 스택:', e.stack);
     }
   }
 
@@ -239,18 +321,23 @@
   }
 
   /**
-   * @param {string} [sourceProjectId] - 생략 시 현재 프로젝트. 지정 시 해당 작품의 저장본을 이름 매칭으로 적용.
+   * @param {string} [sourceProjectId] - 생략 시 현재 프로젝트(현재 페이지 namespace).
+   *   지정 시('@가져오기') **항상 project namespace**에서 로드합니다 — 호출 페이지가
+   *   /ws/이든 /project/이든 시리즈 작품의 플레이어 데이터를 가져오기 위함.
    */
   function loadData(sourceProjectId) {
+    dlog('===== loadData() 호출됨 — source:', sourceProjectId || '(self)', '=====');
+    // 자기 페이지 자동 로드: 현재 namespace 키 / '@가져오기' 교차 로드: 항상 project namespace 강제
     const key = sourceProjectId
-      ? (STORAGE_KEY_PREFIX + sourceProjectId)
+      ? ESM.buildStorageKey('project', sourceProjectId)
       : getStorageKey();
     const raw = localStorage.getItem(key);
+    dlog('loadData — key:', key, 'raw:', raw ? `있음 (${raw.length}바이트)` : '없음');
     if (!raw) {
       if (sourceProjectId) {
         console.warn(`[Entry Save Manager] '@가져오기': 소스 작품(${sourceProjectId})의 저장 데이터 없음`);
       } else {
-        console.log('[Entry Save Manager] 저장된 데이터 없음:', key);
+        info('저장된 데이터 없음:', key);
       }
       return;
     }
@@ -270,7 +357,7 @@
       return;
     }
 
-    console.log('[Entry Save Manager] 저장된 데이터 로드:', data);
+    info('저장된 데이터 로드:', data);
 
     const container = Entry.variableContainer;
     let varOk = 0, varSkip = 0, listOk = 0, listSkip = 0;
@@ -301,7 +388,7 @@
           }
           target.setValue(saved.value);
           varOk++;
-          console.log(`[Entry Save Manager] 변수 복원: ${saved.name} = ${saved.value}`);
+          info(`변수 복원: ${saved.name} = ${saved.value}`);
         } catch (e) {
           console.error(`[Entry Save Manager] 변수 복원 실패 (${saved && saved.name}):`, e);
           varSkip++;
@@ -336,7 +423,7 @@
           }
           target.array_ = sanitized.map((item) => ({ data: item }));
           listOk++;
-          console.log(`[Entry Save Manager] 리스트 복원: ${saved.name} (${sanitized.length}개 항목)`);
+          info(`리스트 복원: ${saved.name} (${sanitized.length}개 항목)`);
         } catch (e) {
           console.error(`[Entry Save Manager] 리스트 복원 실패 (${saved && saved.name}):`, e);
           listSkip++;
@@ -357,9 +444,10 @@
     const statusVar = vars.find((v) => v.name_ === STATUS_VAR_NAME);
     if (statusVar) {
       statusVar.setValue(1);
-      console.log('[Entry Save Manager] 확장프로그램 상태 변수 설정: 1');
+      info('확장프로그램 상태 변수 설정: 1');
     } else {
-      console.warn(`[Entry Save Manager] '${STATUS_VAR_NAME}' 변수를 찾을 수 없습니다.`);
+      // '@확장프로그램' 변수가 없는 작품도 흔함 — 운영 모드에서는 침묵
+      debug(`'${STATUS_VAR_NAME}' 변수를 찾을 수 없습니다.`);
     }
   }
 
@@ -381,12 +469,12 @@
     }
 
     let prevState = Entry.engine.state || 'stop';
-    debug(`watchEngineState 시작 — 초기 상태: ${prevState}`);
+    dlog(`watchEngineState 시작 — 초기 상태: ${prevState}, pageType:`, pageType, 'resolved:', pageTypeResolved);
 
     // ── 초기 진입 시 이미 'run' 상태인 경우 (예: /project/ 자동 실행) ──
     //  폴링/toggleRun 후킹으로는 전이를 감지할 수 없으므로 즉시 초기 로드 수행
     if (prevState === 'run') {
-      console.log('[Entry Save Manager] 진입 시 이미 실행 중 — 초기 로드');
+      info('진입 시 이미 실행 중 — 초기 로드');
       setTimeout(() => {
         loadData();
         setExtensionStatusFlag();
@@ -406,7 +494,7 @@
           const newState = Entry.engine.state;
           debug(`toggleRun 후 상태: ${prevState} → ${newState}`);
           if (newState === 'run') {
-            console.log('[Entry Save Manager] 실행 시작 감지 — 데이터 로드');
+            info('실행 시작 감지 — 데이터 로드');
             loadData();
             setExtensionStatusFlag();
           }
@@ -415,7 +503,7 @@
 
         return result;
       };
-      console.log('[Entry Save Manager] toggleRun 후킹 완료');
+      info('toggleRun 후킹 완료');
     }
 
     // ── 방법 2: 상태 폴링 (자동 실행 및 폴백) ──
@@ -426,7 +514,7 @@
       // non-run → run 전이 감지
       if (currentState === 'run' && prevState !== 'run') {
         debug(`엔진 상태 전이 감지: ${prevState} → ${currentState}`);
-        console.log('[Entry Save Manager] 실행 시작 감지(폴링) — 데이터 로드');
+        info('실행 시작 감지(폴링) — 데이터 로드');
         setTimeout(() => {
           loadData();
           setExtensionStatusFlag();
@@ -572,13 +660,13 @@
     originalSaveBlockFunc = origFunc;
 
     const wrapper = function (sprite, script) {
-      console.log('[Entry Save Manager] "@저장" 함수 호출 감지!');
+      info('"@저장" 함수 호출 감지!');
       saveData();
       return origFunc.call(this, sprite, script);
     };
     wrapper._isSaveMgrHook = true;
     schema.func = wrapper;
-    console.log(`[Entry Save Manager] "@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
+    info(`"@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
     return true;
   }
 
@@ -623,7 +711,7 @@
           debug('"@가져오기": 자기 자신 ID → 현재 저장본 재로드');
           loadData();
         } else {
-          console.log(`[Entry Save Manager] "@가져오기" 호출 — 소스 ID: ${sourceId}`);
+          info(`"@가져오기" 호출 — 소스 ID: ${sourceId}`);
           loadData(sourceId);
         }
       } catch (e) {
@@ -633,7 +721,7 @@
     };
     wrapper._isSaveMgrHook = true;
     schema.func = wrapper;
-    console.log(`[Entry Save Manager] "@가져오기" 함수 블록 (${blockKey}, param=${paramKey}) 후킹 완료 ✓`);
+    info(`"@가져오기" 함수 블록 (${blockKey}, param=${paramKey}) 후킹 완료 ✓`);
     return true;
   }
 
@@ -666,7 +754,8 @@
       console.error('[Entry Save Manager] "@저장" 함수 후킹 최대 재시도 초과');
     }
     if (!loadDone) {
-      console.warn('[Entry Save Manager] "@가져오기" 미후킹 (함수 없거나 스키마 문제 — 선택 기능이므로 무시 가능)');
+      // "@가져오기"는 선택 기능 — 함수 미정의가 흔한 케이스이므로 운영 모드에서는 침묵
+      debug('"@가져오기" 미후킹 (함수 없거나 스키마 문제 — 선택 기능이므로 무시 가능)');
     }
     if (DEBUG && Entry.block) {
       const funcKeys = Object.keys(Entry.block).filter(k => k.startsWith('func_'));
@@ -681,15 +770,46 @@
   //  기존 폴링을 정리하고 플래그를 리셋하여 재주입 시 재초기화를 허용합니다.
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
     const data = event.data;
-    if (!data || data.type !== 'ENTRY_SAVE_MANAGER' || data.action !== 'URL_CHANGED') return;
+    if (!data || data.type !== 'ENTRY_SAVE_MANAGER') return;
+
+    // ── 부모 frame으로부터 PAGE_TYPE 응답 ──
+    if (data.action === 'PAGE_TYPE') {
+      const fromParent = (event.source === window.parent);
+      dlog('PAGE_TYPE 메시지 수신 — pt:', data.pageType, 'fromParent:', fromParent,
+           'sourceIsSelf:', event.source === window);
+      if (!fromParent) {
+        dlog('  → 부모가 아닌 source — 무시');
+        return;
+      }
+      const pt = data.pageType;
+      if ((pt === 'ws' || pt === 'project')) {
+        const changed = pt !== pageType;
+        pageType = pt;
+        pageTypeResolved = true;
+        dlog('  → pageType 적용:', pt, changed ? '(변경됨)' : '(이미 동일)');
+      } else {
+        dlog('  → 잘못된 pageType 값 — 무시');
+      }
+      return;
+    }
+
+    // ── URL 변경 (자기 frame 내부 메시지) ──
+    if (event.source !== window) return;
+    if (data.action !== 'URL_CHANGED') return;
 
     debug('URL 변경 감지 — 폴링 및 후킹 정리');
     if (enginePollTimer) {
       clearInterval(enginePollTimer);
       enginePollTimer = null;
     }
+    if (pageTypeHandshakeTimer) {
+      clearInterval(pageTypeHandshakeTimer);
+      pageTypeHandshakeTimer = null;
+    }
+    // pageType 재결정: 자기 pathname이 ws/project이면 그걸로, 아니면 부모에 재요청
+    pageType = ESM.getPageTypeFromPathname(location.pathname);
+    pageTypeResolved = pageType !== null;
 
     // toggleRun 후킹 복구
     if (hookedEngine && originalToggleRun) {
@@ -745,9 +865,16 @@
   // ─────────────────────────────────────────────
 
   async function init() {
-    console.log('[Entry Save Manager] Entry 객체 대기 중...');
-    await waitForEntry();
-    console.log('[Entry Save Manager] Entry 준비 완료. Project ID:', Entry.projectId);
+    info('Entry 객체 대기 중...');
+    try {
+      await waitForEntry();
+    } catch (e) {
+      // top frame에 Entry가 없는 경우(/project/, /ws/는 자식 iframe에 런타임이 있음)
+      // → 조용히 종료. 같은 페이지의 자식 iframe inject.js가 동작을 담당.
+      debug('init: Entry 미발견으로 종료 —', e.message);
+      return;
+    }
+    info('Entry 준비 완료. Project ID:', Entry.projectId);
 
     // Entry 객체 상태 출력
     if (DEBUG) {
@@ -768,7 +895,7 @@
     // 2) 엔진 상태 감시 — 매 실행 시 데이터 로드 (모든 페이지 공통)
     watchEngineState();
 
-    console.log('[Entry Save Manager] 초기화 완료 ✓');
+    info('초기화 완료 ✓');
   }
 
   // ── Entry 준비 완료 후 초기화 시작 ──
