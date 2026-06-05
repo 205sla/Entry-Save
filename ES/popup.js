@@ -55,7 +55,8 @@ function getPageTypeFromUrl(url) {
 
 function isEntryPage(url) {
   try {
-    return new URL(url).hostname.includes('playentry.org');
+    const hostname = new URL(url).hostname;
+    return hostname.includes('playentry.org') || hostname === 'localhost' || hostname === '127.0.0.1';
   } catch (e) {
     return false;
   }
