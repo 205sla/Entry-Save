@@ -456,6 +456,39 @@
   // ─────────────────────────────────────────────
 
   /**
+   * 주어진 engine 객체의 toggleRun을 후킹합니다 (idempotent).
+   * 엔트리 전체화면(작품보기 ⛶) 등으로 Entry.engine이 새 객체로 교체되면
+   * 옛 engine에 건 후킹이 무효가 되므로, 이 함수를 다시 호출해 새 engine에 재후킹합니다.
+   * 시그니처(_isSaveMgrEngineHook)로 같은 engine 중복 래핑을 막습니다.
+   */
+  function hookEngineToggleRun(engine) {
+    if (!engine || typeof engine.toggleRun !== 'function') return;
+    if (engine.toggleRun._isSaveMgrEngineHook) {
+      hookedEngine = engine; // 이미 우리 래퍼 — 추적 참조만 갱신
+      return;
+    }
+    const original = engine.toggleRun;
+    const boundOriginal = original.bind(engine);
+    const wrapper = function (...args) {
+      const result = boundOriginal(...args);
+      // toggleRun 후 약간의 딜레이를 두고 run 상태면 로드 (즉각 감지)
+      setTimeout(() => {
+        if (window.Entry && Entry.engine && Entry.engine.state === 'run') {
+          info('실행 시작 감지(toggleRun) — 데이터 로드');
+          loadData();
+          setExtensionStatusFlag();
+        }
+      }, STATE_CHECK_DELAY);
+      return result;
+    };
+    wrapper._isSaveMgrEngineHook = true;
+    engine.toggleRun = wrapper;
+    originalToggleRun = original;
+    hookedEngine = engine;
+    info('toggleRun 후킹 완료');
+  }
+
+  /**
    * Entry 엔진의 상태 변화를 지속적으로 감시합니다.
    * 엔진이 'run' 상태로 전환될 때마다 loadData()를 호출합니다.
    * - /ws/ 페이지: Play 버튼 클릭 시 (toggleRun 후킹)
@@ -482,34 +515,35 @@
     }
 
     // ── 방법 1: toggleRun 후킹 (즉각 감지) ──
-    if (Entry.engine.toggleRun && !originalToggleRun) {
-      originalToggleRun = Entry.engine.toggleRun;
-      hookedEngine = Entry.engine;
-      const boundOriginal = originalToggleRun.bind(Entry.engine);
-      Entry.engine.toggleRun = function (...args) {
-        const result = boundOriginal(...args);
+    //  Entry.engine은 전체화면 등으로 교체될 수 있으므로 폴링(방법 2)에서도 재후킹한다.
+    hookEngineToggleRun(Entry.engine);
 
-        // toggleRun 후 약간의 딜레이를 두고 상태 확인
-        setTimeout(() => {
-          const newState = Entry.engine.state;
-          debug(`toggleRun 후 상태: ${prevState} → ${newState}`);
-          if (newState === 'run') {
-            info('실행 시작 감지 — 데이터 로드');
-            loadData();
-            setExtensionStatusFlag();
-          }
-          prevState = newState;
-        }, STATE_CHECK_DELAY);
-
-        return result;
-      };
-      info('toggleRun 후킹 완료');
-    }
-
-    // ── 방법 2: 상태 폴링 (자동 실행 및 폴백) ──
+    // ── 방법 2: 상태 폴링 (자동 실행, 폴백, engine 교체 복구) ──
     if (enginePollTimer) clearInterval(enginePollTimer);
     enginePollTimer = setInterval(() => {
-      const currentState = Entry.engine.state;
+      const eng = window.Entry && Entry.engine;
+      if (!eng) return;
+
+      // ── engine 객체 교체 감지 (엔트리 전체화면 → 런타임 재초기화) ──
+      //  Entry.engine이 새 객체로 바뀌면 옛 engine에 건 toggleRun 후킹이 무효가 된다.
+      //  새 engine에 즉시 재후킹하고, 이미 run이면(stop→run 에지가 안 옴) 곧바로 로드한다.
+      if (eng !== hookedEngine) {
+        debug('engine 객체 교체 감지 — 새 engine에 재후킹');
+        hookEngineToggleRun(eng);
+        if (eng.state === 'run') {
+          info('engine 교체 후 이미 실행 중 — 즉시 로드');
+          setTimeout(() => {
+            loadData();
+            setExtensionStatusFlag();
+          }, STATE_CHECK_DELAY);
+          prevState = 'run';
+        } else {
+          prevState = eng.state;
+        }
+        return;
+      }
+
+      const currentState = eng.state;
 
       // non-run → run 전이 감지
       if (currentState === 'run' && prevState !== 'run') {

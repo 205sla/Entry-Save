@@ -2,7 +2,7 @@
 
 > 엔트리(Entry) 작품에 **세이브/로드** 기능을 블록 몇 개로 붙일 수 있게 해 주는 Chrome 확장 프로그램
 
-![version](https://img.shields.io/badge/version-1.3.6-blue)
+![version](https://img.shields.io/badge/version-1.3.7-blue)
 ![manifest](https://img.shields.io/badge/manifest-v3-green)
 ![platform](https://img.shields.io/badge/platform-Chrome-brightgreen)
 
@@ -168,8 +168,9 @@ localStorage에 저장되는 키 형식:
 
 ## 📦 버전
 
-현재: **v1.3.6**
+현재: **v1.3.7**
 
+- **v1.3.7** — 엔트리 업데이트로 작품보기 전체화면(⛶) 시 `Entry.engine`이 새 객체로 교체되며 자동 불러오기·`@확장프로그램` 설정이 끊기던 문제 수정. 폴링 루프에 engine 교체 감지를 추가해 새 engine에 `toggleRun`을 즉시 재후킹하고, 이미 실행 중이면 곧바로 복원
 - **v1.3.x** — 만들기(`/ws/`)와 작품보기(`/project/`) namespace 분리, `/noframe/<id>` 임베드 페이지 지원, 자식 iframe pageType postMessage 핸드셰이크, `@가져오기`는 항상 작품보기 namespace 사용
 - **v1.2.1** — 팝업 푸터에 "도구.엔트리.org" 패밀리 사이트 링크 추가
 - **v1.2.0** — `@가져오기` 교차 작품 불러오기, primitive 타입 검증, 후킹 signature 가드, `/project/` 초기 자동 실행 대응
