@@ -42,13 +42,17 @@ for (const file of requiredFiles) {
 if (manifest.manifest_version !== 3) {
   throw new Error('manifest_version must be 3.');
 }
+if (manifest.minimum_chrome_version !== '111') {
+  throw new Error('minimum_chrome_version must declare Chrome 111+ for MAIN world content scripts.');
+}
 if (manifest.version !== packageJson.version) {
   throw new Error('manifest and package versions must match.');
 }
-if (!/version-([0-9]+\.[0-9]+\.[0-9]+)-blue/.test(readme)) {
+const badgeMatch = readme.match(/version-([0-9]+\.[0-9]+\.[0-9]+)-blue/);
+if (!badgeMatch) {
   throw new Error('README version badge is missing.');
 }
-if (RegExp.$1 !== manifest.version) {
+if (badgeMatch[1] !== manifest.version) {
   throw new Error('README version badge must match manifest version.');
 }
 const currentMatch = readme.match(/현재:\s+\*\*v([0-9]+\.[0-9]+\.[0-9]+)\*\*/);

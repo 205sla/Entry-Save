@@ -63,6 +63,7 @@ function createFunctionDefinition(name, paramMap) {
 
 async function createHarness(options = {}) {
   const projectId = options.projectId || '6a2a68332a04cc7dacf10718';
+  const pathname = options.pathname || ('/project/' + projectId);
   const sourceProjectId = options.sourceProjectId || '1234567890abcdef12345678';
   const listeners = new Map();
   const intervals = [];
@@ -133,8 +134,8 @@ async function createHarness(options = {}) {
     Entry: entry,
     localStorage,
     location: {
-      href: 'https://playentry.org/project/' + projectId,
-      pathname: '/project/' + projectId,
+      href: 'https://playentry.org' + pathname,
+      pathname,
     },
     console,
     Promise,
@@ -219,6 +220,26 @@ describe('Entry Save MAIN runtime', () => {
     );
   });
 
+  it('/ws/에서는 워크스페이스 전용 namespace에 저장한다', async () => {
+    const projectId = 'cccccccccccccccccccccccc';
+    const harness = await createHarness({
+      projectId,
+      pathname: '/ws/' + projectId,
+    });
+    harness.variable('@점수').value_ = 11;
+
+    harness.entry.block.func_save.func.call({});
+
+    assert.equal(harness.localStorage.getItem('entry_save_' + projectId), null);
+    const stored = JSON.parse(
+      harness.localStorage.getItem('entry_save_ws_' + projectId)
+    );
+    assert.deepEqual(
+      stored.variables.map((item) => [item.name, item.value]),
+      [['@점수', 11]]
+    );
+  });
+
   it('@가져오기 함수는 project namespace의 저장본을 현재 작품에 복원한다', async () => {
     const sourceId = 'aaaaaaaaaaaaaaaaaaaaaaaa';
     const harness = await createHarness({
@@ -267,6 +288,7 @@ describe('Entry Save MAIN runtime', () => {
       },
     });
     assert.equal(harness.variable('@점수').value_, 0);
+    assert.equal(harness.variable('@확장프로그램').value_, 0);
 
     const nextEngine = {
       state: 'run',
@@ -277,6 +299,7 @@ describe('Entry Save MAIN runtime', () => {
     harness.tick();
 
     assert.equal(harness.variable('@점수').value_, 77);
+    assert.equal(harness.variable('@확장프로그램').value_, 1);
     assert.equal(nextEngine.toggleRun._isSaveMgrEngineHook, true);
   });
 
