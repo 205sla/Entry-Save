@@ -20,9 +20,7 @@
     {
       "matches": [
         "https://playentry.org/*",
-        "https://*.playentry.org/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://*.playentry.org/*"
       ],
       "js": ["shared.js", "content.js"],
       "run_at": "document_idle",
@@ -31,9 +29,7 @@
     {
       "matches": [
         "https://playentry.org/*",
-        "https://*.playentry.org/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://*.playentry.org/*"
       ],
       "js": ["shared.js", "inject.js"],
       "run_at": "document_idle",
@@ -46,9 +42,7 @@
       "resources": ["shared.js", "inject.js"],
       "matches": [
         "https://playentry.org/*",
-        "https://*.playentry.org/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
+        "https://*.playentry.org/*"
       ]
     }
   ]
