@@ -61,4 +61,12 @@ describe('Entry Save shared helpers', () => {
       'entry_save_ws_abc12345'
     );
   });
+
+  it('@확장프로그램을 저장 데이터가 아닌 예약 변수로 분류한다', () => {
+    const ESM = loadShared();
+    assert.equal(ESM.PREFIX, '@');
+    assert.equal(ESM.STATUS_VAR_NAME, '@확장프로그램');
+    assert.equal(ESM.isReservedVariableName('@확장프로그램'), true);
+    assert.equal(ESM.isReservedVariableName('@점수'), false);
+  });
 });

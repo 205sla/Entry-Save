@@ -199,6 +199,7 @@ describe('Entry Save MAIN runtime', () => {
   it('@저장 함수 호출 시 @ 변수와 리스트를 현재 namespace에 저장한다', async () => {
     const harness = await createHarness();
     harness.variable('@점수').value_ = 7;
+    harness.variable('@확장프로그램').value_ = 1;
     harness.list('@가방').array_ = [{ data: '칼' }, { data: 3 }];
 
     const result = harness.entry.block.func_save.func.call({});
@@ -210,7 +211,7 @@ describe('Entry Save MAIN runtime', () => {
     );
     assert.deepEqual(
       stored.variables.map((item) => [item.name, item.value]),
-      [['@점수', 7], ['@확장프로그램', 0]]
+      [['@점수', 7]]
     );
     assert.deepEqual(
       stored.lists.map((item) => [item.name, item.array]),
@@ -226,6 +227,7 @@ describe('Entry Save MAIN runtime', () => {
         ['entry_save_' + sourceId]: JSON.stringify({
           variables: [
             { id: 'other', name: '@점수', value: 42 },
+            { id: 'status', name: '@확장프로그램', value: 0 },
             { id: 'bad', name: '@악성', value: { nested: true } },
             { id: 'plain', name: '점수', value: 1 },
           ],
@@ -236,6 +238,7 @@ describe('Entry Save MAIN runtime', () => {
         }),
       },
     });
+    harness.variable('@확장프로그램').value_ = 1;
 
     const result = harness.entry.block.func_load.func.call({
       values: [sourceId],
@@ -249,6 +252,7 @@ describe('Entry Save MAIN runtime', () => {
       ['검', false]
     );
     assert.equal(harness.variable('점수').value_, 999);
+    assert.equal(harness.variable('@확장프로그램').value_, 1);
   });
 
   it('Entry.engine 교체 후 새 engine에 재후킹하고 실행 중이면 저장본을 즉시 복원한다', async () => {

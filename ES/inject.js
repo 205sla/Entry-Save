@@ -20,10 +20,10 @@
   // ─────────────────────────────────────────────
   //  상수 정의
   // ─────────────────────────────────────────────
-  const PREFIX = '@';                      // 추적 대상 변수/리스트 접두사
-  const SAVE_FUNC_NAME = '@저장';          // 저장 트리거 함수 이름
-  const LOAD_FUNC_NAME = '@가져오기';      // 교차 작품 데이터 가져오기 트리거
-  const STATUS_VAR_NAME = '@확장프로그램'; // 확장프로그램 설치 확인 변수
+  const PREFIX = ESM.PREFIX;                      // 추적 대상 변수/리스트 접두사
+  const SAVE_FUNC_NAME = ESM.SAVE_FUNC_NAME;      // 저장 트리거 함수 이름
+  const LOAD_FUNC_NAME = ESM.LOAD_FUNC_NAME;      // 교차 작품 데이터 가져오기 트리거
+  const STATUS_VAR_NAME = ESM.STATUS_VAR_NAME;    // 확장프로그램 설치 확인 변수
   const STORAGE_KEY_PREFIX = ESM.STORAGE_KEY_PREFIX;
 
   // 타이밍 상수 (ms)
@@ -247,7 +247,11 @@
     const container = Entry.variableContainer;
     const vars = container.variables_ || [];
     debug('전체 변수 개수:', vars.length);
-    const filtered = vars.filter((v) => v.name_ && v.name_.startsWith(PREFIX));
+    const filtered = vars.filter((v) => (
+      v.name_
+      && v.name_.startsWith(PREFIX)
+      && !ESM.isReservedVariableName(v.name_)
+    ));
     debug('"@" 접두사 변수 개수:', filtered.length);
     return filtered.map((v) => ({
       id: v.id_,
@@ -372,6 +376,10 @@
           }
           if (typeof saved.name !== 'string' || !saved.name.startsWith(PREFIX)) {
             debug('변수 스킵 — 이름 유효성 실패:', saved && saved.name);
+            varSkip++; return;
+          }
+          if (ESM.isReservedVariableName(saved.name)) {
+            debug('변수 스킵 — 예약 변수:', saved.name);
             varSkip++; return;
           }
           if (!isValidVariableValue(saved.value)) {

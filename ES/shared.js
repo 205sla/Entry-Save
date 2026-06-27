@@ -3,10 +3,19 @@
  */
 var ESM = {
   STORAGE_KEY_PREFIX: 'entry_save_',
+  PREFIX: '@',
+  SAVE_FUNC_NAME: '@저장',
+  LOAD_FUNC_NAME: '@가져오기',
+  STATUS_VAR_NAME: '@확장프로그램',
+  RESERVED_VARIABLE_NAMES: ['@확장프로그램'],
 
   // /ws/ 페이지 namespace 접두사. /project/ 페이지(기본)는 prefix 없이
   // STORAGE_KEY_PREFIX + projectId를 사용하고, /ws/ 페이지만 NAMESPACE_WS를 추가로 붙임.
   NAMESPACE_WS: 'ws_',
+
+  isReservedVariableName: function (name) {
+    return this.RESERVED_VARIABLE_NAMES.indexOf(name) !== -1;
+  },
 
   /**
    * URL pathname에서 프로젝트 ID를 추출합니다.
