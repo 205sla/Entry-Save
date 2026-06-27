@@ -158,11 +158,11 @@ localStorage에 저장되는 키 형식:
 
 | 파일 | 실행 환경 | 역할 |
 |---|---|---|
-| [manifest.json](manifest.json) | — | Manifest V3 정의, playentry.org 스코프 |
-| [shared.js](shared.js) | 공용 | 스토리지 키 빌더, projectId 추출, 페이지 타입 결정 |
-| [inject.js](inject.js) | MAIN world | 핵심 로직 — `window.Entry` 후킹, 자동 로드/저장 |
-| [content.js](content.js) | Isolated world | SPA URL 감지, pageType 핸드셰이크, inject.js 폴백 주입 |
-| [popup.html](popup.html) / [popup.js](popup.js) / [popup.css](popup.css) | Extension | 팝업 UI 및 데이터 관리 |
+| [manifest.json](ES/manifest.json) | — | Manifest V3 정의, playentry.org 스코프 |
+| [shared.js](ES/shared.js) | 공용 | 스토리지 키 빌더, projectId 추출, 페이지 타입 결정 |
+| [inject.js](ES/inject.js) | MAIN world | 핵심 로직 — `window.Entry` 후킹, 자동 로드/저장 |
+| [content.js](ES/content.js) | Isolated world | SPA URL 감지, pageType 핸드셰이크, inject.js 폴백 주입 |
+| [popup.html](ES/popup.html) / [popup.js](ES/popup.js) / [popup.css](ES/popup.css) | Extension | 팝업 UI 및 데이터 관리 |
 | [지식/](지식/) | 문서 | 개발 노트, 문제·해결 기록, 디버깅 가이드 |
 
 ---
