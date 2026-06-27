@@ -1,0 +1,12 @@
+{
+  "name": "entry-save-manager",
+  "version": "1.3.7",
+  "private": true,
+  "description": "Entry project save/load helper for @-prefixed variables and lists.",
+  "scripts": {
+    "check": "node tools/check-extension.js",
+    "test": "node --test ES/tests/*.test.js",
+    "package:release": "node tools/package-extension.js",
+    "verify": "npm run check && npm test"
+  }
+}
