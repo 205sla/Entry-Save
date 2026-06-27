@@ -10,13 +10,13 @@
 
 Entry Save Manager has one single purpose: enable creators on playentry.org (Entry) to persist and restore their project's user-defined variable and list values in the browser's localStorage, so interactive Entry works can implement save/load mechanics (e.g., game progress, inventory).
 
-The extension only tracks variables and lists whose names begin with the "@" prefix. It hooks at most three user-defined identifiers inside an Entry project: the function "@저장" (save trigger), the function "@가져오기" (cross-project import trigger), and the variable "@확장프로그램" (installation status flag). It performs no other functionality, no analytics, no tracking, and no remote network requests. All saved data stays in the user's browser localStorage and is never transmitted off-device.
+The extension only persists variables and lists whose names begin with the "@" prefix, excluding the reserved status variable "@확장프로그램". It hooks at most three user-defined identifiers inside an Entry project: the function "@저장" (save trigger), the function "@가져오기" (cross-project import trigger), and the variable "@확장프로그램" (installation status flag, set to 1 at runtime but not saved or imported). It performs no other functionality, no analytics, no tracking, and no remote network requests. All saved data stays in the user's browser localStorage and is never transmitted off-device.
 
 ### 한국어
 
 Entry Save Manager의 단일 목적: playentry.org(엔트리) 창작자가 작품의 사용자 정의 변수/리스트 값을 브라우저 localStorage에 저장·복원할 수 있게 하여 세이브·로드 기능(예: 게임 진행도, 인벤토리)을 구현하도록 돕는 것입니다.
 
-추적 대상은 이름이 "@"로 시작하는 변수와 리스트로 한정됩니다. 엔트리 프로젝트 내부에서 최대 세 개의 사용자 정의 식별자만 후킹합니다 — 함수 "@저장"(저장 트리거), 함수 "@가져오기"(교차 작품 가져오기 트리거), 변수 "@확장프로그램"(설치 확인 플래그). 그 외 기능·분석·추적·원격 네트워크 요청은 일체 없으며, 모든 저장 데이터는 사용자의 브라우저 localStorage에 머무르고 외부로 전송되지 않습니다.
+저장 대상은 이름이 "@"로 시작하는 변수와 리스트로 한정되며, 예약 상태 변수 "@확장프로그램"은 제외됩니다. 엔트리 프로젝트 내부에서 최대 세 개의 사용자 정의 식별자만 후킹합니다 — 함수 "@저장"(저장 트리거), 함수 "@가져오기"(교차 작품 가져오기 트리거), 변수 "@확장프로그램"(설치 확인 플래그, 실행 중 1로 설정하지만 저장·가져오기 대상 아님). 그 외 기능·분석·추적·원격 네트워크 요청은 일체 없으며, 모든 저장 데이터는 사용자의 브라우저 localStorage에 머무르고 외부로 전송되지 않습니다.
 
 ---
 
