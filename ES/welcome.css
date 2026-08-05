@@ -1,0 +1,144 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  padding: 48px 20px;
+  background:
+    radial-gradient(circle at top left, #dfeaff 0, transparent 38%),
+    #f5f7fb;
+  color: #273142;
+  font-family: Arial, 'Malgun Gothic', sans-serif;
+}
+
+.welcome-card {
+  width: min(680px, 100%);
+  margin: 0 auto;
+  padding: 42px;
+  background: #fff;
+  border: 1px solid #dfe4ee;
+  border-radius: 22px;
+  box-shadow: 0 18px 50px rgba(80, 148, 250, 0.14);
+  text-align: center;
+}
+
+.app-icon {
+  width: 88px;
+  height: 88px;
+}
+
+.eyebrow {
+  margin: 18px 0 8px;
+  color: #5094fa;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(26px, 5vw, 38px);
+  line-height: 1.25;
+}
+
+.thanks {
+  margin: 12px 0 0;
+  color: #657086;
+  font-size: 16px;
+}
+
+.refresh-notice {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 16px;
+  margin: 32px 0 24px;
+  padding: 22px;
+  background: #eef5ff;
+  border: 1px solid #cbdfff;
+  border-radius: 16px;
+  text-align: left;
+}
+
+.refresh-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  background: #5094fa;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+.refresh-notice h2 {
+  margin: 1px 0 7px;
+  font-size: 18px;
+}
+
+.refresh-notice p {
+  margin: 0;
+  color: #566178;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.guide-link {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+  background: #5094fa;
+  border: 1px solid #5094fa;
+  border-radius: 14px;
+  color: #fff;
+  text-align: left;
+  text-decoration: none;
+  transition: box-shadow 0.16s, transform 0.16s;
+}
+
+.guide-link::after {
+  content: '영상 보러 가기 →';
+  margin-top: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.guide-link:hover {
+  box-shadow: 0 10px 24px rgba(80, 148, 250, 0.22);
+  transform: translateY(-2px);
+}
+
+.link-title {
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.link-description {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.unofficial-notice {
+  margin: 28px 0 0;
+  color: #8a93a3;
+  font-size: 11px;
+}
+
+@media (max-width: 600px) {
+  body {
+    padding: 20px 12px;
+  }
+
+  .welcome-card {
+    padding: 30px 20px;
+    border-radius: 18px;
+  }
+
+  .refresh-notice {
+    grid-template-columns: 1fr;
+  }
+}

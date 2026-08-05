@@ -21,6 +21,11 @@ const requiredFiles = new Set([
   'popup.html',
   'popup.css',
   'popup.js',
+  'background.js',
+  'welcome.html',
+  'welcome.css',
+  'icon16.png',
+  'icon32.png',
   'icon48.png',
   'icon128.png',
 ]);
@@ -48,6 +53,9 @@ if (manifest.minimum_chrome_version !== '111') {
 if (manifest.version !== packageJson.version) {
   throw new Error('manifest and package versions must match.');
 }
+if (manifest.background?.service_worker !== 'background.js') {
+  throw new Error('The install welcome service worker is missing.');
+}
 const badgeMatch = readme.match(/version-([0-9]+\.[0-9]+\.[0-9]+)-blue/);
 if (!badgeMatch) {
   throw new Error('README version badge is missing.');
@@ -74,19 +82,34 @@ if (manifest.host_permissions && manifest.host_permissions.length) {
   throw new Error('Entry Save must not request host_permissions.');
 }
 if (JSON.stringify(manifest.icons) !== JSON.stringify({
+  16: 'icon16.png',
+  32: 'icon32.png',
   48: 'icon48.png',
   128: 'icon128.png',
 })) {
-  throw new Error('Manifest icons must include only the existing 48/128px icons.');
+  throw new Error('Manifest icons must include the 16/32/48/128px icons.');
 }
 if (JSON.stringify(manifest.action.default_icon) !== JSON.stringify({
+  16: 'icon16.png',
+  32: 'icon32.png',
   48: 'icon48.png',
   128: 'icon128.png',
 })) {
-  throw new Error('Action icons must include the 48/128px icons.');
+  throw new Error('Action icons must include the 16/32/48/128px icons.');
 }
 
-for (const size of [48, 128]) {
+const welcome = fs.readFileSync(path.join(extensionDir, 'welcome.html'), 'utf8');
+if (!welcome.includes('새로고침해 주세요')) {
+  throw new Error('The install welcome page must explain the required refresh.');
+}
+if (!welcome.includes('https://www.youtube.com/watch?v=qXCHYcxTIeY')) {
+  throw new Error('The Entry Save creator guide link is missing.');
+}
+if (!welcome.includes('엔트리의 공식 확장 프로그램이 아닙니다')) {
+  throw new Error('Unofficial extension notice is missing from the welcome page.');
+}
+
+for (const size of [16, 32, 48, 128]) {
   const data = fs.readFileSync(path.join(extensionDir, 'icon' + size + '.png'));
   if (data.length < 24
       || data.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a'
@@ -145,7 +168,13 @@ for (const [file, expected] of Object.entries(debugExpectations)) {
   }
 }
 
-for (const file of ['shared.js', 'content.js', 'inject.js', 'popup.js']) {
+for (const file of [
+  'shared.js',
+  'content.js',
+  'inject.js',
+  'popup.js',
+  'background.js',
+]) {
   const source = fs.readFileSync(path.join(extensionDir, file), 'utf8');
   if (/\beval\s*\(|new\s+Function\s*\(/.test(source)) {
     throw new Error(file + ' contains remote-code-compatible evaluation.');

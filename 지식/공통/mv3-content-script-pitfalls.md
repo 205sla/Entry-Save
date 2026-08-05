@@ -67,7 +67,7 @@ globalThis.ESM = {
 
 `inject.js`/`content.js`는 그냥 `ESM.foo()` 호출 (`window.ESM`을 안 써도 됨 — JS의 globalThis lookup chain이 처리).
 
-> Entry Save Manager 1.3.8의 실제 [shared.js](../../ES/shared.js)는 역사적 롤백 맥락 때문에 아직 `var ESM = {...}`를 유지한다. 이 문서의 권장 예시는 새 설계나 별도 검증을 거친 전환 기준으로만 사용한다.
+> Entry Save Manager 1.3.9의 실제 [shared.js](../../ES/shared.js)는 역사적 롤백 맥락 때문에 아직 `var ESM = {...}`를 유지한다. 이 문서의 권장 예시는 새 설계나 별도 검증을 거친 전환 기준으로만 사용한다.
 
 ---
 

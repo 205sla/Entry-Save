@@ -2,7 +2,7 @@
 
 > 엔트리(Entry) 작품에 **세이브/로드** 기능을 블록 몇 개로 붙일 수 있게 해 주는 Chrome 확장 프로그램
 
-![version](https://img.shields.io/badge/version-1.3.8-blue)
+![version](https://img.shields.io/badge/version-1.3.9-blue)
 ![manifest](https://img.shields.io/badge/manifest-v3-green)
 ![platform](https://img.shields.io/badge/platform-Chrome-brightgreen)
 
@@ -163,14 +163,16 @@ localStorage에 저장되는 키 형식:
 | [inject.js](ES/inject.js) | MAIN world | 핵심 로직 — `window.Entry` 후킹, 자동 로드/저장 |
 | [content.js](ES/content.js) | Isolated world | SPA URL 감지, pageType 핸드셰이크, inject.js 폴백 주입 |
 | [popup.html](ES/popup.html) / [popup.js](ES/popup.js) / [popup.css](ES/popup.css) | Extension | 팝업 UI 및 데이터 관리 |
+| [background.js](ES/background.js) / [welcome.html](ES/welcome.html) | Extension | 최초 설치 시 새로고침 및 제작 가이드 안내 |
 | [지식/](지식/) | 문서 | 개발 노트, 문제·해결 기록, 디버깅 가이드 |
 
 ---
 
 ## 📦 버전
 
-현재: **v1.3.8**
+현재: **v1.3.9**
 
+- **v1.3.9** — 최초 설치 시 기존 엔트리 작품의 새로고침 필요성과 제작법 영상을 안내하고, 작은 크기에서도 식별하기 쉬운 고대비 저장 아이콘으로 교체.
 - **v1.3.8** — 검증/패키징 스크립트 추가, 스토어 빌드 정리(매치 도메인을 `playentry.org` 전용으로 축소, `@저장` 미정의 작품의 콘솔 에러 침묵), `@확장프로그램`을 저장·가져오기 대상에서 제외.
 - **v1.3.7** — 엔트리 업데이트로 작품보기 전체화면(⛶) 시 `Entry.engine`이 새 객체로 교체되며 자동 불러오기·`@확장프로그램` 설정이 끊기던 문제 수정. 폴링 루프에 engine 교체 감지를 추가해 새 engine에 `toggleRun`을 즉시 재후킹하고, 이미 실행 중이면 곧바로 복원.
 - **v1.3.x** — 만들기(`/ws/`)와 작품보기(`/project/`) namespace 분리, `/noframe/<id>` 임베드 페이지 지원, 자식 iframe pageType postMessage 핸드셰이크, `@가져오기`는 항상 작품보기 namespace 사용

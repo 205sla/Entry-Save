@@ -22,6 +22,11 @@ const files = [
   'popup.html',
   'popup.css',
   'popup.js',
+  'background.js',
+  'welcome.html',
+  'welcome.css',
+  'icon16.png',
+  'icon32.png',
   'icon48.png',
   'icon128.png',
 ];
@@ -47,7 +52,7 @@ function readPngSize(file) {
   };
 }
 
-for (const size of [48, 128]) {
+for (const size of [16, 32, 48, 128]) {
   const iconPath = path.join(extensionDir, 'icon' + size + '.png');
   const dimensions = readPngSize(iconPath);
   if (dimensions.width !== size || dimensions.height !== size) {

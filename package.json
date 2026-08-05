@@ -1,6 +1,6 @@
 {
   "name": "entry-save-manager",
-  "version": "1.3.8",
+  "version": "1.3.9",
   "private": true,
   "description": "Entry project save/load helper for @-prefixed variables and lists.",
   "scripts": {
