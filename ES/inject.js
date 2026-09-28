@@ -29,7 +29,6 @@
   // 타이밍 상수 (ms)
   const POLL_INTERVAL = 500;               // Entry 객체 / 엔진 상태 폴링 간격
   const STATE_CHECK_DELAY = 300;           // 상태 전이 후 확인 딜레이
-  const HOOK_RETRY_MAX = 20;              // 함수 후킹 최대 재시도 (POLL_INTERVAL × N)
 
   // 디버그 로깅 (배포 시 false로 설정)
   const DEBUG = false;
@@ -46,18 +45,16 @@
 
   // 활성 폴링 타이머 (정리용)
   let enginePollTimer = null;
+  let disposed = false;
+  let runSession = null;
 
   // toggleRun 후킹 원본 참조 (URL 변경 시 복구용)
   let originalToggleRun = null;
   let hookedEngine = null;
+  let toggleRunWrapper = null;
 
-  // '@저장' 함수 블록 후킹 원본 참조 (URL 변경 시 복구용)
-  let hookedSaveBlockKey = null;
-  let originalSaveBlockFunc = null;
-
-  // '@가져오기' 함수 블록 후킹 원본 참조
-  let hookedLoadBlockKey = null;
-  let originalLoadBlockFunc = null;
+  // 스키마와 래퍼 자체를 추적해 교체·이름 변경 시 자기 후킹만 해제한다.
+  const functionHooks = new Map();
 
   // 페이지 타입 판별 — /project/, /iframe/, /noframe/ 모두 작품 실행 페이지
   // (/noframe/은 자식 iframe 없이 top frame이 곧 runtime인 변형)
@@ -98,7 +95,7 @@
     }
   }
 
-  // 부모가 없는 경우(top frame인데 /ws/도 /project/도 아님)에는 핸드셰이크 불필요 → 'ws' 폴백
+  // 부모가 없는 경우에는 핸드셰이크 없이 getStorageKey()의 'project' 폴백 사용
   if (!pageTypeResolved && window.parent !== window) {
     dlog('pageType 미해결 → 핸드셰이크 시작');
     requestPageTypeFromParent();
@@ -109,7 +106,7 @@
         clearInterval(pageTypeHandshakeTimer);
         pageTypeHandshakeTimer = null;
         if (!pageTypeResolved) {
-          dlog('핸드셰이크 타임아웃 (' + HANDSHAKE_MAX_ATTEMPTS + '회 시도) — \'ws\' 폴백 사용 예정');
+          dlog('핸드셰이크 타임아웃 (' + HANDSHAKE_MAX_ATTEMPTS + '회 시도) — \'project\' 폴백 사용 예정');
         } else {
           dlog('핸드셰이크 성공 후 타이머 종료');
         }
@@ -120,7 +117,7 @@
       requestPageTypeFromParent();
     }, 500);
   } else if (!pageTypeResolved) {
-    dlog('pageType 미해결이지만 부모 없음 → \'ws\' 폴백 사용');
+    dlog('pageType 미해결이지만 부모 없음 → \'project\' 폴백 사용');
   } else {
     dlog('pageType 자기 pathname에서 해결 → 핸드셰이크 불필요');
   }
@@ -159,6 +156,10 @@
       // 일정 횟수 후 포기해 무한 폴링/콘솔 노이즈를 막는다.
       const MAX_POLLS = 60; // 60 × 500ms = 30초
       const check = () => {
+        if (disposed) {
+          reject(new Error('Entry Save instance disposed'));
+          return;
+        }
         pollCount++;
 
         // 기본 체크
@@ -309,7 +310,7 @@
 
   /**
    * 저장된 변수 값이 복원 가능한 primitive 타입인지 검증합니다.
-   * Entry의 변수는 number/string만 허용하며 객체/배열/함수는 주입 위험.
+   * 기존 저장본의 number/string/boolean/null을 허용하고 객체·배열은 제외합니다.
    */
   function isValidVariableValue(value) {
     const t = typeof value;
@@ -335,7 +336,13 @@
     const key = sourceProjectId
       ? ESM.buildStorageKey('project', sourceProjectId)
       : getStorageKey();
-    const raw = localStorage.getItem(key);
+    let raw;
+    try {
+      raw = localStorage.getItem(key);
+    } catch (e) {
+      console.error('[Entry Save Manager] 저장 데이터 읽기 실패:', e);
+      return;
+    }
     dlog('loadData — key:', key, 'raw:', raw ? `있음 (${raw.length}바이트)` : '없음');
     if (!raw) {
       if (sourceProjectId) {
@@ -387,7 +394,11 @@
             varSkip++; return;
           }
           const target = currentVars.find(
-            (v) => v.id_ === saved.id || v.name_ === saved.name
+            (v) => typeof v.name_ === 'string'
+              && v.name_.startsWith(PREFIX)
+              && !ESM.isReservedVariableName(v.name_)
+              && (sourceProjectId ? v.name_ === saved.name
+                : v.id_ === saved.id || v.name_ === saved.name)
           );
           if (!target) { varSkip++; return; }
           if (typeof target.setValue !== 'function') {
@@ -421,7 +432,10 @@
             listSkip++; return;
           }
           const target = currentLists.find(
-            (l) => l.id_ === saved.id || l.name_ === saved.name
+            (l) => typeof l.name_ === 'string'
+              && l.name_.startsWith(PREFIX)
+              && (sourceProjectId ? l.name_ === saved.name
+                : l.id_ === saved.id || l.name_ === saved.name)
           );
           if (!target) { listSkip++; return; }
 
@@ -463,36 +477,70 @@
   //  엔진 상태 감시 — 실행 시마다 데이터 로드
   // ─────────────────────────────────────────────
 
-  /**
-   * 주어진 engine 객체의 toggleRun을 후킹합니다 (idempotent).
-   * 엔트리 전체화면(작품보기 ⛶) 등으로 Entry.engine이 새 객체로 교체되면
-   * 옛 engine에 건 후킹이 무효가 되므로, 이 함수를 다시 호출해 새 engine에 재후킹합니다.
-   * 시그니처(_isSaveMgrEngineHook)로 같은 engine 중복 래핑을 막습니다.
-   */
-  function hookEngineToggleRun(engine) {
-    if (!engine || typeof engine.toggleRun !== 'function') return;
-    if (engine.toggleRun._isSaveMgrEngineHook) {
-      hookedEngine = engine; // 이미 우리 래퍼 — 추적 참조만 갱신
+  function cancelPendingLoad() {
+    if (runSession && runSession.timer !== null) {
+      clearTimeout(runSession.timer);
+      runSession.timer = null;
+    }
+  }
+
+  // toggleRun과 폴링이 같은 실행 세션을 공유한다. pause→run은 새 실행이 아니다.
+  function observeEngineState(engine) {
+    if (disposed || !engine || engine !== (window.Entry && Entry.engine)) return;
+    const state = engine.state;
+    const stopped = (value) => value === 'stop' || value === 'stopping';
+    if (!runSession || runSession.engine !== engine
+        || (stopped(state) && !stopped(runSession.state))) {
+      cancelPendingLoad();
+      runSession = { engine, state, loaded: false, timer: null };
+    }
+    runSession.state = state;
+    if (state !== 'run') {
+      cancelPendingLoad();
       return;
     }
+    if (runSession.loaded || runSession.timer !== null) return;
+    const session = runSession;
+    session.timer = setTimeout(() => {
+      session.timer = null;
+      if (disposed || runSession !== session || Entry.engine !== engine
+          || engine.state !== 'run') return;
+      session.loaded = true;
+      loadData();
+      setExtensionStatusFlag();
+    }, STATE_CHECK_DELAY);
+  }
+
+  function releaseEngineHook() {
+    if (hookedEngine && hookedEngine.toggleRun === toggleRunWrapper) {
+      hookedEngine.toggleRun = originalToggleRun;
+    }
+    hookedEngine = null;
+    originalToggleRun = null;
+    toggleRunWrapper = null;
+  }
+
+  /** 새 engine을 폴링과 동일한 실행 세션 감시에 연결한다. */
+  function hookEngineToggleRun(engine) {
+    if (!engine || typeof engine.toggleRun !== 'function') return;
+    if (engine === hookedEngine) return;
+    releaseEngineHook();
     const original = engine.toggleRun;
-    const boundOriginal = original.bind(engine);
     const wrapper = function (...args) {
-      const result = boundOriginal(...args);
-      // toggleRun 후 약간의 딜레이를 두고 run 상태면 로드 (즉각 감지)
-      setTimeout(() => {
-        if (window.Entry && Entry.engine && Entry.engine.state === 'run') {
-          info('실행 시작 감지(toggleRun) — 데이터 로드');
-          loadData();
-          setExtensionStatusFlag();
-        }
-      }, STATE_CHECK_DELAY);
+      if (!disposed) {
+        // 다음 500ms 폴링 전 실행하더라도 새 함수가 첫 호출부터 연결되도록 한다.
+        hookFunctionCalls();
+        observeEngineState(engine);
+      }
+      const result = original.apply(this, args);
+      observeEngineState(engine);
       return result;
     };
     wrapper._isSaveMgrEngineHook = true;
     engine.toggleRun = wrapper;
     originalToggleRun = original;
     hookedEngine = engine;
+    toggleRunWrapper = wrapper;
     info('toggleRun 후킹 완료');
   }
 
@@ -504,84 +552,55 @@
    * 정지 후 재실행 시에도 매번 데이터를 불러옵니다.
    */
   function watchEngineState() {
-    if (!Entry.engine) {
-      console.warn('[Entry Save Manager] Entry.engine을 찾을 수 없습니다.');
-      return;
-    }
-
-    let prevState = Entry.engine.state || 'stop';
-    dlog(`watchEngineState 시작 — 초기 상태: ${prevState}, pageType:`, pageType, 'resolved:', pageTypeResolved);
-
-    // ── 초기 진입 시 이미 'run' 상태인 경우 (예: /project/ 자동 실행) ──
-    //  폴링/toggleRun 후킹으로는 전이를 감지할 수 없으므로 즉시 초기 로드 수행
-    if (prevState === 'run') {
-      info('진입 시 이미 실행 중 — 초기 로드');
-      setTimeout(() => {
-        loadData();
-        setExtensionStatusFlag();
-      }, STATE_CHECK_DELAY);
-    }
-
-    // ── 방법 1: toggleRun 후킹 (즉각 감지) ──
-    //  Entry.engine은 전체화면 등으로 교체될 수 있으므로 폴링(방법 2)에서도 재후킹한다.
-    hookEngineToggleRun(Entry.engine);
-
-    // ── 방법 2: 상태 폴링 (자동 실행, 폴백, engine 교체 복구) ──
-    if (enginePollTimer) clearInterval(enginePollTimer);
-    enginePollTimer = setInterval(() => {
+    const check = () => {
+      if (disposed) return;
+      hookFunctionCalls();
       const eng = window.Entry && Entry.engine;
-      if (!eng) return;
-
-      // ── engine 객체 교체 감지 (엔트리 전체화면 → 런타임 재초기화) ──
-      //  Entry.engine이 새 객체로 바뀌면 옛 engine에 건 toggleRun 후킹이 무효가 된다.
-      //  새 engine에 즉시 재후킹하고, 이미 run이면(stop→run 에지가 안 옴) 곧바로 로드한다.
-      if (eng !== hookedEngine) {
-        debug('engine 객체 교체 감지 — 새 engine에 재후킹');
-        hookEngineToggleRun(eng);
-        if (eng.state === 'run') {
-          info('engine 교체 후 이미 실행 중 — 즉시 로드');
-          setTimeout(() => {
-            loadData();
-            setExtensionStatusFlag();
-          }, STATE_CHECK_DELAY);
-          prevState = 'run';
-        } else {
-          prevState = eng.state;
-        }
+      if (!eng) {
+        cancelPendingLoad();
+        runSession = null;
         return;
       }
-
-      const currentState = eng.state;
-
-      // non-run → run 전이 감지
-      if (currentState === 'run' && prevState !== 'run') {
-        debug(`엔진 상태 전이 감지: ${prevState} → ${currentState}`);
-        info('실행 시작 감지(폴링) — 데이터 로드');
-        setTimeout(() => {
-          loadData();
-          setExtensionStatusFlag();
-        }, STATE_CHECK_DELAY);
-      }
-
-      prevState = currentState;
-    }, POLL_INTERVAL);
+      hookEngineToggleRun(eng);
+      observeEngineState(eng);
+    };
+    check();
+    if (enginePollTimer) clearInterval(enginePollTimer);
+    enginePollTimer = setInterval(check, POLL_INTERVAL);
   }
 
   /**
    * Entry 함수 content에서 함수 이름(라벨)을 추출합니다.
-   * JSON.stringify 후 정규식 또는 문자열 검색으로 추출합니다.
+   * 본문의 문자열은 읽지 않고 함수 정의의 제목 연결만 따라갑니다.
    */
   function extractFunctionName(funcObj) {
     try {
       if (!funcObj || !funcObj.content) return '';
-      const jsonStr = JSON.stringify(funcObj.content);
-      const matches = [];
-      const regex = /"type"\s*:\s*"function_field_label"\s*,\s*"params"\s*:\s*\[\s*"([^"]+)"/g;
-      let match;
-      while ((match = regex.exec(jsonStr)) !== null) {
-        matches.push(match[1]);
+      const content = funcObj.content;
+      let definition;
+      if (typeof content.getEventMap === 'function') {
+        definition = content.getEventMap('funcDef')[0];
+      } else {
+        let json = typeof content.toJSON === 'function' ? content.toJSON() : content;
+        if (typeof json === 'string') json = JSON.parse(json);
+        const blocks = Array.isArray(json) ? json.flat() : [json];
+        definition = blocks.find((block) => block && (
+          block.type === 'function_create' || block.type === 'function_create_value'
+        ));
       }
-      return matches.join(' ').trim();
+      let field = definition && definition.params && definition.params[0];
+      const labels = [];
+      const seen = new Set();
+      while (field && !seen.has(field)) {
+        seen.add(field);
+        if (field.type === 'function_field_label') {
+          if (!field.params || typeof field.params[0] !== 'string') return '';
+          labels.push(field.params[0]);
+        }
+        field = typeof field.getOutputBlock === 'function'
+          ? field.getOutputBlock() : field.params && field.params[1];
+      }
+      return labels.join(' ').trim();
     } catch (e) {
       return '';
     }
@@ -589,7 +608,7 @@
 
   /**
    * 주어진 이름과 일치하는 Entry 함수의 ID를 찾습니다.
-   * extractFunctionName으로 먼저 시도하고, 실패 시 JSON 직접 검색합니다.
+   * 제목 라벨 전체가 정확히 일치하는 함수만 사용합니다.
    */
   function findFunctionIdByName(targetName) {
     const functions = Entry.variableContainer && Entry.variableContainer.functions_;
@@ -600,23 +619,13 @@
 
     const funcEntries = Object.entries(functions);
 
-    // 방법 1: 이름 추출 매칭
+    // 정확한 제목 매칭
     for (const [funcId, funcObj] of funcEntries) {
       const name = extractFunctionName(funcObj);
       if (name === targetName) {
         debug(`이름 매칭: "${targetName}" → id=${funcId}`);
         return funcId;
       }
-    }
-
-    // 방법 2: JSON 직접 검색
-    for (const [funcId, funcObj] of funcEntries) {
-      try {
-        if (JSON.stringify(funcObj.content).includes(targetName)) {
-          debug(`JSON 검색: "${targetName}" → id=${funcId}`);
-          return funcId;
-        }
-      } catch (e) { /* ignore */ }
     }
 
     debug(`"${targetName}" 함수를 찾지 못했습니다.`);
@@ -683,126 +692,66 @@
     return typeof id === 'string' && /^[a-f0-9]{8,}$/i.test(id);
   }
 
-  /**
-   * '@저장' 함수 블록을 후킹합니다. 성공 시 true.
-   * 이미 다른 인스턴스가 후킹했거나(signature 체크) 스키마가 준비 안 되면 스킵.
-   */
-  function tryHookSave(funcId) {
-    const blockKey = 'func_' + funcId;
-    const schema = Entry.block && Entry.block[blockKey];
-    if (!schema || !schema.func) return false;
-    if (schema.func._isSaveMgrHook) {
-      debug(`@저장: 이미 다른 인스턴스가 후킹 — ${blockKey}`);
-      return true;
+  function releaseFunctionHook(hook) {
+    // 다른 확장이 우리 래퍼를 감쌌어도 기존 래퍼는 저장·로드를 다시 실행하지 않는다.
+    hook.active = false;
+    if (hook.schema.func === hook.wrapper) {
+      if (hook.hadOwnFunc) hook.schema.func = hook.original;
+      else delete hook.schema.func;
     }
-    if (hookedSaveBlockKey === blockKey && originalSaveBlockFunc) return true;
-
-    const origFunc = schema.func;
-    hookedSaveBlockKey = blockKey;
-    originalSaveBlockFunc = origFunc;
-
-    const wrapper = function (sprite, script) {
-      info('"@저장" 함수 호출 감지!');
-      saveData();
-      return origFunc.call(this, sprite, script);
-    };
-    wrapper._isSaveMgrHook = true;
-    schema.func = wrapper;
-    info(`"@저장" 함수 블록 (${blockKey}) 후킹 완료 ✓`);
-    return true;
   }
 
-  /**
-   * '@가져오기' 함수 블록을 후킹합니다. 성공 시 true.
-   */
-  function tryHookLoad(funcId) {
-    const blockKey = 'func_' + funcId;
-    const schema = Entry.block && Entry.block[blockKey];
-    if (!schema || !schema.func) return false;
-    if (schema.func._isSaveMgrHook) {
-      debug(`@가져오기: 이미 다른 인스턴스가 후킹 — ${blockKey}`);
-      return true;
-    }
-    if (hookedLoadBlockKey === blockKey && originalLoadBlockFunc) return true;
-
-    const { paramMap, paramKey } = getFuncParamKey(funcId);
-    if (!paramMap || !paramKey) {
-      console.warn('[Entry Save Manager] "@가져오기" 함수의 paramMap 없음 — 동작 불가');
-      return false;
-    }
-
-    const origFunc = schema.func;
-    hookedLoadBlockKey = blockKey;
-    originalLoadBlockFunc = origFunc;
-
-    const wrapper = function (sprite, script) {
-      try {
-        // 1차: 호출 블록 인스턴스의 평가된 인자
-        let sourceId = readCallBlockArg(this, paramMap, paramKey);
-        // 2차: 정적 리터럴 fallback
-        if (sourceId == null) {
-          sourceId = readCallBlockLiteralStatic(blockKey);
-          if (sourceId != null) debug('"@가져오기": this.values 비어있음 — 정적 리터럴 사용');
-        }
-
-        if (!sourceId) {
-          console.warn('[Entry Save Manager] "@가져오기": 파라미터 값을 읽을 수 없음');
-        } else if (!isValidProjectId(sourceId)) {
-          console.warn(`[Entry Save Manager] "@가져오기": 유효하지 않은 프로젝트 ID — "${sourceId}"`);
-        } else if (sourceId === getProjectId()) {
-          debug('"@가져오기": 자기 자신 ID → 현재 저장본 재로드');
-          loadData();
-        } else {
-          info(`"@가져오기" 호출 — 소스 ID: ${sourceId}`);
-          loadData(sourceId);
-        }
-      } catch (e) {
-        console.error('[Entry Save Manager] "@가져오기" 처리 오류:', e);
+  function invokeLoad(funcId, callBlock) {
+    try {
+      // 함수 편집으로 paramMap이 교체될 수 있으므로 호출 시점에 읽는다.
+      const { paramMap, paramKey } = getFuncParamKey(funcId);
+      let sourceId = readCallBlockArg(callBlock, paramMap, paramKey);
+      if (sourceId == null) sourceId = readCallBlockLiteralStatic('func_' + funcId);
+      if (!sourceId || !isValidProjectId(sourceId)) {
+        console.warn('[Entry Save Manager] "@가져오기": 유효한 프로젝트 ID를 읽을 수 없음');
+      } else if (sourceId === getProjectId()) {
+        loadData();
+      } else {
+        loadData(sourceId);
       }
-      return origFunc.call(this, sprite, script);
-    };
-    wrapper._isSaveMgrHook = true;
-    schema.func = wrapper;
-    info(`"@가져오기" 함수 블록 (${blockKey}, param=${paramKey}) 후킹 완료 ✓`);
-    return true;
+    } catch (e) {
+      console.error('[Entry Save Manager] "@가져오기" 처리 오류:', e);
+    }
   }
 
-  /**
-   * '@저장' / '@가져오기' 함수 호출을 후킹합니다.
-   * 함수 블록이 아직 등록되지 않았으면 폴링으로 재시도합니다.
-   * 둘 중 하나만 있어도 정상 동작합니다.
-   */
-  async function hookFunctionCalls() {
-    let saveDone = !!hookedSaveBlockKey;
-    let loadDone = !!hookedLoadBlockKey;
-
-    for (let attempt = 1; attempt <= HOOK_RETRY_MAX; attempt++) {
-      debug(`hookFunctionCalls() 시도 #${attempt} — save:${saveDone}, load:${loadDone}`);
-
-      if (!saveDone) {
-        const id = findFunctionIdByName(SAVE_FUNC_NAME);
-        if (id && tryHookSave(id)) saveDone = true;
+  // 제한된 재시도 대신 현재 함수 이름·ID·스키마를 지속적으로 확인한다.
+  function hookFunctionCalls() {
+    if (disposed || !window.Entry || !Entry.variableContainer) return;
+    for (const name of [SAVE_FUNC_NAME, LOAD_FUNC_NAME]) {
+      const funcId = findFunctionIdByName(name);
+      const schema = funcId && Entry.block && Entry.block['func_' + funcId];
+      const previous = functionHooks.get(name);
+      if (previous && previous.funcId === funcId && previous.schema === schema
+          && schema.func === previous.wrapper) continue;
+      if (previous) {
+        releaseFunctionHook(previous);
+        functionHooks.delete(name);
       }
-      if (!loadDone) {
-        const id = findFunctionIdByName(LOAD_FUNC_NAME);
-        if (id && tryHookLoad(id)) loadDone = true;
-      }
-      if (saveDone && loadDone) return;
-
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-    }
-
-    if (!saveDone) {
-      // '@저장' 함수가 없는 작품도 흔함(확장은 모든 작품에 주입됨) — 운영 모드에서는 침묵
-      debug('"@저장" 함수 미후킹 (함수 미정의 — 정상일 수 있음)');
-    }
-    if (!loadDone) {
-      // "@가져오기"는 선택 기능 — 함수 미정의가 흔한 케이스이므로 운영 모드에서는 침묵
-      debug('"@가져오기" 미후킹 (함수 없거나 스키마 문제 — 선택 기능이므로 무시 가능)');
-    }
-    if (DEBUG && Entry.block) {
-      const funcKeys = Object.keys(Entry.block).filter(k => k.startsWith('func_'));
-      debug('최종 Entry.block func_ 키:', funcKeys);
+      if (!schema || typeof schema.func !== 'function') continue;
+      const hook = {
+        funcId, schema, original: schema.func, active: true,
+        hadOwnFunc: Object.prototype.hasOwnProperty.call(schema, 'func'),
+      };
+      hook.wrapper = function (...args) {
+        // 해제된 래퍼는 SPA 이동으로 Entry가 사라져도 원래 호출만 전달한다.
+        if (!disposed && hook.active && window.Entry) {
+          const functions = Entry.variableContainer && Entry.variableContainer.functions_;
+          // 이름 변경 직후, 다음 폴링 전 호출도 잘못된 저장을 일으키지 않는다.
+          if (extractFunctionName(functions && functions[funcId]) === name) {
+            if (name === SAVE_FUNC_NAME) saveData();
+            else invokeLoad(funcId, this);
+          }
+        }
+        return hook.original.apply(this, args);
+      };
+      hook.wrapper._isSaveMgrHook = true;
+      schema.func = hook.wrapper;
+      functionHooks.set(name, hook);
     }
   }
 
@@ -812,7 +761,8 @@
   //  content.js가 URL 변경을 감지하면 URL_CHANGED 메시지를 보냅니다.
   //  기존 폴링을 정리하고 플래그를 리셋하여 재주입 시 재초기화를 허용합니다.
 
-  window.addEventListener('message', (event) => {
+  function onMessage(event) {
+    if (disposed) return;
     const data = event.data;
     if (!data || data.type !== 'ENTRY_SAVE_MANAGER') return;
 
@@ -854,54 +804,17 @@
     pageType = ESM.getPageTypeFromPathname(location.pathname);
     pageTypeResolved = pageType !== null;
 
-    // toggleRun 후킹 복구
-    if (hookedEngine && originalToggleRun) {
-      try {
-        hookedEngine.toggleRun = originalToggleRun;
-        debug('toggleRun 원본 복구 완료');
-      } catch (e) {
-        debug('toggleRun 복구 실패:', e);
-      }
-      hookedEngine = null;
-      originalToggleRun = null;
-    }
-
-    // '@저장' 함수 블록 후킹 복구 (signature 체크로 자기 래퍼만 복구)
-    if (hookedSaveBlockKey && originalSaveBlockFunc && window.Entry && Entry.block && Entry.block[hookedSaveBlockKey]) {
-      try {
-        const curFunc = Entry.block[hookedSaveBlockKey].func;
-        if (curFunc && curFunc._isSaveMgrHook) {
-          Entry.block[hookedSaveBlockKey].func = originalSaveBlockFunc;
-          debug(`'@저장' 블록(${hookedSaveBlockKey}) 원본 복구 완료`);
-        } else {
-          debug(`'@저장' 블록(${hookedSaveBlockKey}) 이미 교체됨 — 복구 스킵`);
-        }
-      } catch (e) {
-        debug('@저장 블록 복구 실패:', e);
-      }
-    }
-    hookedSaveBlockKey = null;
-    originalSaveBlockFunc = null;
-
-    // '@가져오기' 함수 블록 후킹 복구
-    if (hookedLoadBlockKey && originalLoadBlockFunc && window.Entry && Entry.block && Entry.block[hookedLoadBlockKey]) {
-      try {
-        const curFunc = Entry.block[hookedLoadBlockKey].func;
-        if (curFunc && curFunc._isSaveMgrHook) {
-          Entry.block[hookedLoadBlockKey].func = originalLoadBlockFunc;
-          debug(`'@가져오기' 블록(${hookedLoadBlockKey}) 원본 복구 완료`);
-        } else {
-          debug(`'@가져오기' 블록(${hookedLoadBlockKey}) 이미 교체됨 — 복구 스킵`);
-        }
-      } catch (e) {
-        debug('@가져오기 블록 복구 실패:', e);
-      }
-    }
-    hookedLoadBlockKey = null;
-    originalLoadBlockFunc = null;
+    disposed = true;
+    cancelPendingLoad();
+    runSession = null;
+    releaseEngineHook();
+    for (const hook of functionHooks.values()) releaseFunctionHook(hook);
+    functionHooks.clear();
+    window.removeEventListener('message', onMessage);
 
     window.__entrySaveManagerLoaded = false;
-  });
+  }
+  window.addEventListener('message', onMessage);
 
   // ─────────────────────────────────────────────
   //  초기화 (메인 로직)
@@ -917,6 +830,7 @@
       debug('init: Entry 미발견으로 종료 —', e.message);
       return;
     }
+    if (disposed) return;
     info('Entry 준비 완료. Project ID:', Entry.projectId);
 
     // Entry 객체 상태 출력
@@ -931,11 +845,7 @@
       debug('========================');
     }
 
-    // 1) 함수 호출 후킹 (저장 트리거 — '@저장' 함수)
-    //    폴링 방식으로 함수/블록이 준비될 때까지 재시도
-    hookFunctionCalls();
-
-    // 2) 엔진 상태 감시 — 매 실행 시 데이터 로드 (모든 페이지 공통)
+    // 함수 연결과 실행 세션을 함께 지속 감시한다.
     watchEngineState();
 
     info('초기화 완료 ✓');

@@ -2,7 +2,7 @@
 
 > 엔트리(Entry) 작품에 **세이브/로드** 기능을 블록 몇 개로 붙일 수 있게 해 주는 Chrome 확장 프로그램
 
-![version](https://img.shields.io/badge/version-1.3.9-blue)
+![version](https://img.shields.io/badge/version-1.3.10-blue)
 ![manifest](https://img.shields.io/badge/manifest-v3-green)
 ![platform](https://img.shields.io/badge/platform-Chrome-brightgreen)
 
@@ -184,8 +184,11 @@ localStorage에 저장되는 키 형식:
 
 ## 📦 버전
 
-현재: **v1.3.9**
+현재: **v1.3.10**
 
+[v1.3.10 소스·ZIP 사전 배포](https://github.com/205sla/Entry-Save/releases/tag/v1.3.10). 자동 검증은 통과했으며, 실제 엔트리 사이트 검증과 Chrome 웹스토어 업데이트는 아직 완료되지 않았습니다.
+
+- **v1.3.10** — 기존 저장 키·JSON 형식을 유지하면서 다른 작품의 ID 충돌과 자동 복원 중복을 방지. 뒤늦은 함수 추가·스키마 교체 시 저장/가져오기 연결을 복구하고 함수 제목을 정확히 비교. 현재 변수·리스트의 저장 자격을 검증하며, 저장소 읽기 실패가 작품 실행을 중단하지 않도록 처리. 타이머 회귀 테스트와 개발자 가이드 예제의 양방향 호환 테스트 추가.
 - **v1.3.9** — 최초 설치 시 기존 엔트리 작품의 새로고침 필요성과 제작법 영상을 안내하고, 작은 크기에서도 식별하기 쉬운 고대비 저장 아이콘으로 교체.
 - **v1.3.8** — 검증/패키징 스크립트 추가, 스토어 빌드 정리(매치 도메인을 `playentry.org` 전용으로 축소, `@저장` 미정의 작품의 콘솔 에러 침묵), `@확장프로그램`을 저장·가져오기 대상에서 제외.
 - **v1.3.7** — 엔트리 업데이트로 작품보기 전체화면(⛶) 시 `Entry.engine`이 새 객체로 교체되며 자동 불러오기·`@확장프로그램` 설정이 끊기던 문제 수정. 폴링 루프에 engine 교체 감지를 추가해 새 engine에 `toggleRun`을 즉시 재후킹하고, 이미 실행 중이면 곧바로 복원.
